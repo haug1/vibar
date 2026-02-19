@@ -1,12 +1,18 @@
+use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 
+use gio::{Menu as GioMenu, SimpleAction, SimpleActionGroup};
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Button, GestureClick, Image, Orientation, Widget};
+use gtk::{
+    Box as GtkBox, Button, GestureClick, Image, Orientation, PopoverMenu, PositionType, Widget,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use zbus::blocking::{Connection, Proxy};
+use zbus::zvariant::{OwnedObjectPath, OwnedValue};
+use zbus::Error as ZbusError;
 use zbus::Result as ZbusResult;
 
 use crate::modules::ModuleConfig;
@@ -17,6 +23,7 @@ const WATCHER_DESTINATION: &str = "org.kde.StatusNotifierWatcher";
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const WATCHER_INTERFACE: &str = "org.kde.StatusNotifierWatcher";
 const ITEM_INTERFACE: &str = "org.kde.StatusNotifierItem";
+const DBUS_MENU_INTERFACE: &str = "com.canonical.dbusmenu";
 const MODULE_TYPE: &str = "tray";
 const DEFAULT_ICON_SIZE: i32 = 16;
 const MIN_ICON_SIZE: i32 = 8;
@@ -41,6 +48,24 @@ struct TrayItemSnapshot {
     icon_name: String,
     title: String,
 }
+
+#[derive(Debug, Clone)]
+struct TrayMenuEntry {
+    id: i32,
+    label: String,
+    enabled: bool,
+    visible: bool,
+    is_separator: bool,
+    children: Vec<TrayMenuEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct TrayMenuModel {
+    menu_path: String,
+    entries: Vec<TrayMenuEntry>,
+}
+
+type TrayMenuLayout = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
 
 pub(crate) struct TrayFactory;
 
@@ -154,25 +179,22 @@ fn render_tray_items(container: &GtkBox, items: &[TrayItemSnapshot], icon_size: 
 
         let destination = item.destination.clone();
         let path = item.path.clone();
-        button.connect_clicked(move |_| {
-            activate_item(destination.clone(), path.clone());
+        let click_button = button.clone();
+        let click = GestureClick::builder().button(0).build();
+        click.connect_released(move |gesture, _, x, y| {
+            let current_button = gesture.current_button();
+            match current_button {
+                1 => activate_item(destination.clone(), path.clone()),
+                2 => secondary_activate_item(destination.clone(), path.clone(), x as i32, y as i32),
+                3 => {
+                    if !show_item_menu(&click_button, destination.clone(), path.clone()) {
+                        context_menu_item(destination.clone(), path.clone(), x as i32, y as i32);
+                    }
+                }
+                _ => {}
+            }
         });
-
-        let destination = item.destination.clone();
-        let path = item.path.clone();
-        let right_click = GestureClick::builder().button(3).build();
-        right_click.connect_pressed(move |_, _, x, y| {
-            context_menu_item(destination.clone(), path.clone(), x as i32, y as i32);
-        });
-        button.add_controller(right_click);
-
-        let destination = item.destination.clone();
-        let path = item.path.clone();
-        let middle_click = GestureClick::builder().button(2).build();
-        middle_click.connect_pressed(move |_, _, x, y| {
-            secondary_activate_item(destination.clone(), path.clone(), x as i32, y as i32);
-        });
-        button.add_controller(middle_click);
+        button.add_controller(click);
 
         container.append(&button);
     }
@@ -183,7 +205,47 @@ fn activate_item(destination: String, path: String) {
 }
 
 fn context_menu_item(destination: String, path: String, x: i32, y: i32) {
-    call_item_method(destination, path, "ContextMenu", x, y);
+    call_item_methods_with_fallback(
+        destination,
+        path,
+        vec!["ContextMenu", "SecondaryActivate", "Activate"],
+        x,
+        y,
+    );
+}
+
+fn show_item_menu(anchor: &Button, destination: String, path: String) -> bool {
+    let Some(model) = fetch_dbus_menu_model(&destination, &path) else {
+        return false;
+    };
+
+    if model.entries.is_empty() {
+        return false;
+    }
+
+    let action_group = SimpleActionGroup::new();
+    let menu_model = GioMenu::new();
+    append_entries_to_menu_model(
+        &menu_model,
+        &model.entries,
+        &action_group,
+        &destination,
+        &model.menu_path,
+    );
+    if menu_model.n_items() == 0 {
+        return false;
+    }
+
+    let popover = PopoverMenu::from_model(Some(&menu_model));
+    popover.add_css_class("tray-menu-popover");
+    popover.set_has_arrow(true);
+    popover.set_autohide(true);
+    popover.set_position(PositionType::Top);
+    popover.insert_action_group("traymenu", Some(&action_group));
+    popover.set_parent(anchor);
+    popover.popup();
+
+    true
 }
 
 fn secondary_activate_item(destination: String, path: String, x: i32, y: i32) {
@@ -191,8 +253,24 @@ fn secondary_activate_item(destination: String, path: String, x: i32, y: i32) {
 }
 
 fn call_item_method(destination: String, path: String, method: &'static str, x: i32, y: i32) {
+    call_item_methods_with_fallback(destination, path, vec![method], x, y);
+}
+
+fn call_item_methods_with_fallback(
+    destination: String,
+    path: String,
+    methods: Vec<&'static str>,
+    x: i32,
+    y: i32,
+) {
     thread::spawn(move || {
         let Ok(connection) = Connection::session() else {
+            if tray_debug_enabled() {
+                eprintln!(
+                    "mybar/tray: no session bus for {destination}{path} methods={}",
+                    methods.join(",")
+                );
+            }
             return;
         };
 
@@ -202,11 +280,226 @@ fn call_item_method(destination: String, path: String, method: &'static str, x: 
             path.as_str(),
             ITEM_INTERFACE,
         ) else {
+            if tray_debug_enabled() {
+                eprintln!(
+                    "mybar/tray: failed proxy for {destination}{path} methods={}",
+                    methods.join(",")
+                );
+            }
             return;
         };
 
-        let _result: ZbusResult<()> = proxy.call(method, &(x, y));
+        for method in &methods {
+            let result: ZbusResult<()> = proxy.call(*method, &(x, y));
+            match result {
+                Ok(()) => {
+                    if tray_debug_enabled() {
+                        eprintln!("mybar/tray: method ok {destination}{path} {method}({x}, {y})");
+                    }
+                    return;
+                }
+                Err(err) => {
+                    if tray_debug_enabled() {
+                        eprintln!(
+                            "mybar/tray: method error {destination}{path} {method}({x}, {y}): {err}"
+                        );
+                    }
+                    if !is_method_missing_error(&err) {
+                        return;
+                    }
+                }
+            }
+        }
+
+        if tray_debug_enabled() {
+            eprintln!(
+                "mybar/tray: no supported click methods for {destination}{path} tried={}",
+                methods.join(",")
+            );
+        }
     });
+}
+
+fn fetch_dbus_menu_model(destination: &str, item_path: &str) -> Option<TrayMenuModel> {
+    let connection = Connection::session().ok()?;
+    let item_proxy = Proxy::new(&connection, destination, item_path, ITEM_INTERFACE).ok()?;
+
+    let menu_path = item_proxy
+        .get_property::<OwnedObjectPath>("Menu")
+        .ok()
+        .map(|path| path.to_string())?;
+
+    if menu_path == "/" {
+        return None;
+    }
+
+    let entries = {
+        let menu_proxy = Proxy::new(
+            &connection,
+            destination,
+            menu_path.as_str(),
+            DBUS_MENU_INTERFACE,
+        )
+        .ok()?;
+
+        let _about_to_show: ZbusResult<bool> = menu_proxy.call("AboutToShow", &(0_i32,));
+
+        let (_revision, root): (u32, TrayMenuLayout) = menu_proxy
+            .call("GetLayout", &(0_i32, 1_i32, Vec::<String>::new()))
+            .ok()?;
+
+        root.2
+            .into_iter()
+            .filter_map(parse_menu_entry_node)
+            .collect::<Vec<_>>()
+    };
+
+    Some(TrayMenuModel { menu_path, entries })
+}
+
+fn parse_menu_entry_node(value: OwnedValue) -> Option<TrayMenuEntry> {
+    let (id, props, children): TrayMenuLayout = value.try_into().ok()?;
+    let label = read_menu_label(&props);
+    let enabled = read_bool_prop(&props, "enabled").unwrap_or(true);
+    let visible = read_bool_prop(&props, "visible").unwrap_or(true);
+    let is_separator = read_string_prop(&props, "type")
+        .is_some_and(|item_type| item_type.eq_ignore_ascii_case("separator"));
+    let children = children
+        .into_iter()
+        .filter_map(parse_menu_entry_node)
+        .collect::<Vec<_>>();
+
+    Some(TrayMenuEntry {
+        id,
+        label,
+        enabled,
+        visible,
+        is_separator,
+        children,
+    })
+}
+
+fn read_menu_label(props: &HashMap<String, OwnedValue>) -> String {
+    let raw = read_string_prop(props, "label").unwrap_or_default();
+    let without_mnemonic = raw.replace('_', "");
+    if without_mnemonic.trim().is_empty() {
+        "Menu item".to_string()
+    } else {
+        without_mnemonic
+    }
+}
+
+fn read_string_prop(props: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
+    props
+        .get(key)
+        .and_then(|value| <&str>::try_from(value).ok().map(ToString::to_string))
+}
+
+fn read_bool_prop(props: &HashMap<String, OwnedValue>, key: &str) -> Option<bool> {
+    props.get(key).and_then(|value| bool::try_from(value).ok())
+}
+
+fn append_entries_to_menu_model(
+    menu: &GioMenu,
+    entries: &[TrayMenuEntry],
+    action_group: &SimpleActionGroup,
+    destination: &str,
+    menu_path: &str,
+) {
+    let mut section = GioMenu::new();
+    let mut section_has_items = false;
+
+    for entry in entries {
+        if !entry.visible {
+            continue;
+        }
+
+        if entry.is_separator {
+            if section_has_items {
+                menu.append_section(None, &section);
+                section = GioMenu::new();
+                section_has_items = false;
+            }
+            continue;
+        }
+
+        if !entry.children.is_empty() {
+            let submenu = GioMenu::new();
+            append_entries_to_menu_model(
+                &submenu,
+                &entry.children,
+                action_group,
+                destination,
+                menu_path,
+            );
+            if submenu.n_items() > 0 {
+                section.append_submenu(Some(&entry.label), &submenu);
+                section_has_items = true;
+            }
+            continue;
+        }
+
+        let action_name = action_name_for_id(entry.id);
+        let detailed_action = format!("traymenu.{action_name}");
+        let action = SimpleAction::new(&action_name, None);
+        let destination = destination.to_string();
+        let menu_path = menu_path.to_string();
+        let id = entry.id;
+        action.connect_activate(move |_, _| {
+            send_menu_event(destination.clone(), menu_path.clone(), id);
+        });
+        action.set_enabled(entry.enabled);
+        action_group.add_action(&action);
+        section.append(Some(&entry.label), Some(&detailed_action));
+        section_has_items = true;
+    }
+
+    if section_has_items {
+        menu.append_section(None, &section);
+    }
+}
+
+fn action_name_for_id(id: i32) -> String {
+    if id < 0 {
+        format!("item_n{}", id.unsigned_abs())
+    } else {
+        format!("item_{id}")
+    }
+}
+
+fn send_menu_event(destination: String, menu_path: String, item_id: i32) {
+    thread::spawn(move || {
+        let Ok(connection) = Connection::session() else {
+            return;
+        };
+        let Ok(menu_proxy) = Proxy::new(
+            &connection,
+            destination.as_str(),
+            menu_path.as_str(),
+            DBUS_MENU_INTERFACE,
+        ) else {
+            return;
+        };
+
+        let _event_result: ZbusResult<()> = menu_proxy.call(
+            "Event",
+            &(
+                item_id,
+                "clicked",
+                OwnedValue::from(0_i32),
+                0_u32, // event timestamp is optional for many providers
+            ),
+        );
+    });
+}
+
+fn is_method_missing_error(err: &ZbusError) -> bool {
+    matches!(
+        err,
+        ZbusError::MethodError(name, _, _)
+            if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod"
+                || name.as_str() == "org.freedesktop.DBus.Error.UnknownInterface"
+    )
 }
 
 fn fetch_tray_snapshot() -> Vec<TrayItemSnapshot> {
@@ -239,6 +532,12 @@ fn fetch_tray_snapshot() -> Vec<TrayItemSnapshot> {
 
     snapshots.sort_by(|a, b| a.id.cmp(&b.id));
     snapshots
+}
+
+fn tray_debug_enabled() -> bool {
+    std::env::var("MYBAR_DEBUG_TRAY")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 fn parse_item_address(raw: String) -> Option<(String, String, String)> {

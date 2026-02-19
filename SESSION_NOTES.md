@@ -23,12 +23,15 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Config-driven `tray` module via `config.jsonc`
   - polls `org.kde.StatusNotifierWatcher` for tray items
   - renders icon-name based tray buttons
-  - left click calls item `Activate`, right click calls `ContextMenu`, middle click calls `SecondaryActivate`
+  - left click calls item `Activate`
+  - right click prefers host-rendered DBusMenu (`Menu` + `com.canonical.dbusmenu`, including nested submenus) with fallback to item click methods
+  - middle click calls item `SecondaryActivate`
   - `icon_size` defaults to `16` (min `8`), `poll_interval_secs` defaults to `2` (min `1`)
 - Default CSS comes from repo `style.css` (embedded at build time)
 - Workspaces active detection prefers sway `get_tree()` focus with fallback to `get_workspaces().focused`
 - Workspace module subscribes to sway workspace/output events for event-driven refresh
 - Workspace debug logging can be enabled with `MYBAR_DEBUG_WORKSPACES=1`
+- Tray DBus click/method debug logging can be enabled with `MYBAR_DEBUG_TRAY=1`
 
 ## Standard Commands
 

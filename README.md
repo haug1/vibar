@@ -117,7 +117,7 @@ Module schema:
   - `icon_size` defaults to `16` and values below `8` are clamped
   - `poll_interval_secs` defaults to `2` and values below `1` are clamped
   - left click: calls SNI `Activate`
-  - right click: calls SNI `ContextMenu`
+  - right click: prefers host-rendered DBusMenu via SNI `Menu` + `com.canonical.dbusmenu` (including nested submenus); falls back to SNI click methods
   - middle click: calls SNI `SecondaryActivate`
   - current implementation uses `IconName`/`AttentionIconName` for icons (icon pixmap fallback is not implemented yet)
 
@@ -165,6 +165,8 @@ Suggested selectors:
 
 - To log sway workspace state each refresh, run with `MYBAR_DEBUG_WORKSPACES=1`.
   - Example: `MYBAR_DEBUG_WORKSPACES=1 cargo run --locked`
+- To log tray DBus click method calls/errors, run with `MYBAR_DEBUG_TRAY=1`.
+  - Example: `MYBAR_DEBUG_TRAY=1 cargo run --locked`
 
 ## Next Steps
 

@@ -17,7 +17,6 @@
 }
 
 .workspaces {
-  spacing: 4px;
 }
 
 .menu-button {
@@ -55,7 +54,6 @@
 }
 
 .tray {
-  spacing: 4px;
 }
 
 .tray-item {
@@ -73,6 +71,10 @@
 
 .tray-item image {
   color: #e6ebf5;
+}
+
+.tray-menu-popover contents {
+  padding: 4px;
 }
 
 .workspace-status {
