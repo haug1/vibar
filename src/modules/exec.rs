@@ -197,3 +197,98 @@ fn run_exec_command(command: &str) -> String {
         Err(err) => format!("exec error: {err}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use serde_json::Map;
+
+    use super::*;
+
+    #[test]
+    fn parse_config_rejects_wrong_module_type() {
+        let module = ModuleConfig::new("clock", Map::new());
+        let err = parse_config(&module).expect_err("wrong type should fail");
+        assert!(err.contains("expected module type 'exec'"));
+    }
+
+    #[test]
+    fn parse_config_requires_command() {
+        let module = ModuleConfig::new(MODULE_TYPE, Map::new());
+        let err = parse_config(&module).expect_err("missing command should fail");
+        assert!(err.contains("invalid exec module config"));
+    }
+
+    #[test]
+    fn run_exec_command_prefers_stdout() {
+        let output = run_exec_command("printf 'out'; printf 'err' >&2");
+        assert_eq!(output, "out");
+    }
+
+    #[test]
+    fn run_exec_command_falls_back_to_stderr() {
+        let output = run_exec_command("printf 'err-only' >&2");
+        assert_eq!(output, "err-only");
+    }
+
+    #[test]
+    fn shared_exec_backend_broadcasts_to_all_subscribers() {
+        let backend = SharedExecBackend::default();
+        let (sender_a, recv_a) = mpsc::channel();
+        let (sender_b, recv_b) = mpsc::channel();
+
+        backend.add_subscriber(sender_a);
+        backend.add_subscriber(sender_b);
+        backend.broadcast("42".to_string());
+
+        assert_eq!(
+            recv_a
+                .recv_timeout(Duration::from_millis(100))
+                .expect("subscriber A should receive update"),
+            "42"
+        );
+        assert_eq!(
+            recv_b
+                .recv_timeout(Duration::from_millis(100))
+                .expect("subscriber B should receive update"),
+            "42"
+        );
+    }
+
+    #[test]
+    fn shared_exec_backend_replays_latest_to_new_subscriber() {
+        let backend = SharedExecBackend::default();
+        backend.broadcast("latest".to_string());
+
+        let (sender, receiver) = mpsc::channel();
+        backend.add_subscriber(sender);
+
+        assert_eq!(
+            receiver
+                .recv_timeout(Duration::from_millis(100))
+                .expect("subscriber should receive latest value immediately"),
+            "latest"
+        );
+    }
+
+    #[test]
+    fn shared_exec_backend_drops_disconnected_subscribers() {
+        let backend = SharedExecBackend::default();
+        let (dead_sender, dead_receiver) = mpsc::channel::<String>();
+        drop(dead_receiver);
+
+        let (alive_sender, _alive_receiver) = mpsc::channel::<String>();
+        backend.add_subscriber(dead_sender);
+        backend.add_subscriber(alive_sender);
+        backend.broadcast("x".to_string());
+
+        let subscriber_count = backend
+            .subscribers
+            .lock()
+            .expect("subscribers mutex should lock")
+            .len();
+        assert_eq!(subscriber_count, 1);
+    }
+}

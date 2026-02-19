@@ -39,3 +39,17 @@ pub(crate) fn build_module(config: &ModuleConfig) -> Result<Widget, String> {
 
     factory.init(config)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Map;
+
+    use super::*;
+
+    #[test]
+    fn build_module_rejects_unknown_module_type() {
+        let module = ModuleConfig::new("does-not-exist", Map::new());
+        let err = build_module(&module).expect_err("unknown module should fail");
+        assert!(err.contains("unknown module type 'does-not-exist'"));
+    }
+}

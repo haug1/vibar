@@ -76,3 +76,24 @@ pub(crate) fn build_clock_module(format: Option<String>) -> Label {
 
     label
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::Map;
+
+    use super::*;
+
+    #[test]
+    fn parse_config_rejects_wrong_module_type() {
+        let module = ModuleConfig::new("exec", Map::new());
+        let err = parse_config(&module).expect_err("wrong type should fail");
+        assert!(err.contains("expected module type 'clock'"));
+    }
+
+    #[test]
+    fn parse_config_accepts_default_format() {
+        let module = ModuleConfig::new(MODULE_TYPE, Map::new());
+        let parsed = parse_config(&module).expect("clock config should parse");
+        assert!(parsed.format.is_none());
+    }
+}

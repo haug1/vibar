@@ -54,3 +54,41 @@ pub(crate) fn load_config(path: &str) -> Config {
 pub(crate) fn parse_config(content: &str) -> Result<Config, json5::Error> {
     json5::from_str::<Config>(content)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_config_missing_file_returns_defaults() {
+        let cfg = load_config("./this-file-should-not-exist.jsonc");
+        assert_eq!(cfg.areas.left.len(), 1);
+        assert_eq!(cfg.areas.center.len(), 0);
+        assert_eq!(cfg.areas.right.len(), 1);
+    }
+
+    #[test]
+    fn parse_config_rejects_invalid_content() {
+        let err = parse_config("{ not valid json5 ").expect_err("invalid config should fail");
+        let msg = err.to_string();
+        assert!(!msg.is_empty());
+    }
+
+    #[test]
+    fn parse_config_applies_explicit_areas() {
+        let cfg = parse_config(
+            r#"{
+                areas: {
+                    left: [{ type: "clock" }],
+                    center: [{ type: "clock" }],
+                    right: [{ type: "clock" }]
+                }
+            }"#,
+        )
+        .expect("config should parse");
+
+        assert_eq!(cfg.areas.left.len(), 1);
+        assert_eq!(cfg.areas.center.len(), 1);
+        assert_eq!(cfg.areas.right.len(), 1);
+    }
+}
