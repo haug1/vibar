@@ -18,7 +18,9 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - `right`: clock (updates every 1s)
 - Config-driven `exec` modules via `config.jsonc`
   - `exec.interval_secs` defaults to `5` and is clamped to a minimum of `1`
-- Optional CSS load from `./style.css` (no error if missing)
+- Default CSS comes from repo `style.css` (embedded at build time)
+- Workspaces active detection prefers sway `get_tree()` focus with fallback to `get_workspaces().focused`
+- Workspace debug logging can be enabled with `MYBAR_DEBUG_WORKSPACES=1`
 
 ## Standard Commands
 

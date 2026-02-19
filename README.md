@@ -75,7 +75,7 @@ make ci
   - `workspaces` (default in `left`, via sway IPC)
   - `clock` (default in `right`, updates every second on GTK main loop)
   - `exec` (runs shell command periodically and displays output, minimum interval is 1 second)
-- Optional CSS loading from `./style.css` (ignored if missing)
+- Default styling loaded from repo `style.css` (embedded at build time)
 
 ## Runtime Notes
 
@@ -113,14 +113,22 @@ Module schema:
 
 ## Styling
 
-If `./style.css` exists, it is loaded at startup.
+`style.css` in the repository is the default maintained theme and is always loaded.
+Keep this file up to date when module classes or interaction states change.
 
 Suggested selectors:
 
 - `.bar`
 - `.left`
 - `.menu-button`
+- `.menu-button.active`
+- `.menu-button.workspace-active`
 - `.clock`
+
+## Troubleshooting
+
+- To log sway workspace state each refresh, run with `MYBAR_DEBUG_WORKSPACES=1`.
+  - Example: `MYBAR_DEBUG_WORKSPACES=1 cargo run --locked`
 
 ## Next Steps
 

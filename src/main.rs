@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
 use chrono::Local;
@@ -77,7 +76,7 @@ fn main() {
     app.connect_activate(|app| {
         let config = load_config(CONFIG_PATH);
         let window = build_window(app, &config);
-        load_optional_css();
+        load_default_css();
         window.present();
     });
 
@@ -101,14 +100,9 @@ fn parse_config(content: &str) -> Result<Config, json5::Error> {
     json5::from_str::<Config>(content)
 }
 
-fn load_optional_css() {
-    let css_path = Path::new("./style.css");
-    if !css_path.exists() {
-        return;
-    }
-
+fn load_default_css() {
     let provider = gtk::CssProvider::new();
-    provider.load_from_path(css_path);
+    provider.load_from_data(include_str!("../style.css"));
 
     if let Some(display) = gdk::Display::default() {
         gtk::style_context_add_provider_for_display(
@@ -292,12 +286,43 @@ fn refresh_workspaces(container: &GtkBox) {
 
     workspaces.sort_by_key(|w| w.num);
 
+    let focused_workspace_from_list = workspaces
+        .iter()
+        .find(|ws| ws.focused)
+        .map(|ws| ws.name.clone());
+
+    let focused_workspace_from_tree = focused_workspace_name_from_tree(&mut connection);
+    let focused_workspace = focused_workspace_from_tree
+        .clone()
+        .or_else(|| focused_workspace_from_list.clone());
+
+    if workspace_debug_enabled() {
+        eprintln!(
+            "mybar/workspaces: focused(tree)={:?} focused(list)={:?} all=[{}]",
+            focused_workspace_from_tree,
+            focused_workspace_from_list,
+            workspaces
+                .iter()
+                .map(|ws| format!(
+                    "{{name={},num={},focused={},visible={},output={}}}",
+                    ws.name, ws.num, ws.focused, ws.visible, ws.output
+                ))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
     for ws in workspaces {
         let button = Button::with_label(&ws.name);
         button.add_css_class("menu-button");
+        button.set_focusable(false);
 
-        if ws.focused {
+        if focused_workspace
+            .as_ref()
+            .is_some_and(|active_name| active_name == &ws.name)
+        {
             button.add_css_class("active");
+            button.add_css_class("workspace-active");
         }
 
         let ws_name = ws.name.clone();
@@ -310,6 +335,50 @@ fn refresh_workspaces(container: &GtkBox) {
 
         container.append(&button);
     }
+}
+
+fn focused_workspace_name_from_tree(connection: &mut Connection) -> Option<String> {
+    let tree = connection.get_tree().ok()?;
+    focused_workspace_name_in_node(&tree)
+}
+
+fn focused_workspace_name_in_node(node: &swayipc::Node) -> Option<String> {
+    focused_workspace_name_in_node_with_context(node, None)
+}
+
+fn focused_workspace_name_in_node_with_context(
+    node: &swayipc::Node,
+    current_workspace: Option<&str>,
+) -> Option<String> {
+    let workspace_ctx = if node.node_type == swayipc::NodeType::Workspace {
+        node.name.as_deref().or(current_workspace)
+    } else {
+        current_workspace
+    };
+
+    if node.focused {
+        return workspace_ctx.map(ToOwned::to_owned);
+    }
+
+    for child in &node.nodes {
+        if let Some(name) = focused_workspace_name_in_node_with_context(child, workspace_ctx) {
+            return Some(name);
+        }
+    }
+
+    for child in &node.floating_nodes {
+        if let Some(name) = focused_workspace_name_in_node_with_context(child, workspace_ctx) {
+            return Some(name);
+        }
+    }
+
+    None
+}
+
+fn workspace_debug_enabled() -> bool {
+    std::env::var("MYBAR_DEBUG_WORKSPACES")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 fn build_clock_module(format: Option<String>) -> Label {
