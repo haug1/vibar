@@ -9,8 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use swayipc::{Connection, EventType};
 
-use crate::modules::ModuleConfig;
-use crate::modules::ModuleFactory;
+use crate::modules::{ModuleBuildContext, ModuleConfig, ModuleFactory};
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub(crate) struct WorkspaceConfig {}
@@ -25,9 +24,9 @@ impl ModuleFactory for SwayWorkspaceFactory {
         MODULE_TYPE
     }
 
-    fn init(&self, config: &ModuleConfig) -> Result<Widget, String> {
+    fn init(&self, config: &ModuleConfig, context: &ModuleBuildContext) -> Result<Widget, String> {
         let _ = parse_config(config)?;
-        Ok(build_workspaces_module().upcast())
+        Ok(build_workspaces_module(context.monitor_connector.clone()).upcast())
     }
 }
 
@@ -47,7 +46,7 @@ fn parse_config(module: &ModuleConfig) -> Result<WorkspaceConfig, String> {
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-pub(crate) fn build_workspaces_module() -> GtkBox {
+pub(crate) fn build_workspaces_module(output_filter: Option<String>) -> GtkBox {
     let container = GtkBox::new(Orientation::Horizontal, 4);
     container.add_css_class("module");
     container.add_css_class("workspaces");
@@ -56,18 +55,18 @@ pub(crate) fn build_workspaces_module() -> GtkBox {
         Ok(pair) => pair,
         Err(err) => {
             eprintln!("mybar/workspaces: failed to create event signal pipe: {err}");
-            refresh_workspaces(&container);
+            refresh_workspaces(&container, output_filter.as_deref());
             return container;
         }
     };
     if let Err(err) = signal_rx.set_nonblocking(true) {
         eprintln!("mybar/workspaces: failed to set nonblocking event signal pipe: {err}");
-        refresh_workspaces(&container);
+        refresh_workspaces(&container, output_filter.as_deref());
         return container;
     }
 
     start_workspace_event_listener(signal_tx);
-    refresh_workspaces(&container);
+    refresh_workspaces(&container, output_filter.as_deref());
 
     // Refresh only when the sway listener emits an event callback signal.
     glib::source::unix_fd_add_local(
@@ -75,6 +74,7 @@ pub(crate) fn build_workspaces_module() -> GtkBox {
         glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
         {
             let container = container.clone();
+            let output_filter = output_filter.clone();
             move |_, condition| {
                 if condition.intersects(glib::IOCondition::HUP | glib::IOCondition::ERR) {
                     if workspace_debug_enabled() {
@@ -103,7 +103,7 @@ pub(crate) fn build_workspaces_module() -> GtkBox {
                 }
 
                 if had_event {
-                    refresh_workspaces(&container);
+                    refresh_workspaces(&container, output_filter.as_deref());
                 }
                 ControlFlow::Continue
             }
@@ -153,7 +153,7 @@ fn start_workspace_event_listener(mut signal_tx: std::os::unix::net::UnixStream)
     });
 }
 
-fn refresh_workspaces(container: &GtkBox) {
+fn refresh_workspaces(container: &GtkBox, output_filter: Option<&str>) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
@@ -178,6 +178,9 @@ fn refresh_workspaces(container: &GtkBox) {
         }
     };
 
+    if let Some(output) = output_filter {
+        workspaces.retain(|ws| ws.output == output);
+    }
     workspaces.sort_by_key(|w| w.num);
 
     let focused_workspace_from_list = workspaces
@@ -192,7 +195,8 @@ fn refresh_workspaces(container: &GtkBox) {
 
     if workspace_debug_enabled() {
         eprintln!(
-            "mybar/workspaces: focused(tree)={:?} focused(list)={:?} all=[{}]",
+            "mybar/workspaces: output_filter={:?} focused(tree)={:?} focused(list)={:?} all=[{}]",
+            output_filter,
             focused_workspace_from_tree,
             focused_workspace_from_list,
             workspaces
