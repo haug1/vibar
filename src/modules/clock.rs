@@ -1,9 +1,27 @@
 use chrono::Local;
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::Label;
+use gtk::{Label, Widget};
+
+use crate::config::ModuleConfig;
+
+use super::ModuleFactory;
 
 const DEFAULT_CLOCK_FMT: &str = "%a %d. %b %H:%M:%S";
+
+pub(crate) struct ClockFactory;
+
+pub(crate) const FACTORY: ClockFactory = ClockFactory;
+
+impl ModuleFactory for ClockFactory {
+    fn init(&self, config: &ModuleConfig) -> Option<Widget> {
+        let ModuleConfig::Clock { format } = config else {
+            return None;
+        };
+
+        Some(build_clock_module(format.clone()).upcast())
+    }
+}
 
 pub(crate) fn build_clock_module(format: Option<String>) -> Label {
     let label = Label::new(None);

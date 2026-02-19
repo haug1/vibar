@@ -37,7 +37,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Config parsing/models: `src/config.rs`
 - Style loading: `src/style.rs`
 - Module builders: `src/modules/`
-  - Module instantiation is centralized via `modules::build_module(&ModuleConfig)`
+  - Each module owns its own `ModuleFactory::init` implementation; `modules::build_module` just routes to registered factories.
 - Workspace module: `src/modules/sway/workspace.rs`
 - Rust deps: `Cargo.toml`
 - Lockfile: `Cargo.lock`

@@ -66,8 +66,11 @@ fn build_window(app: &Application, config: &Config) -> ApplicationWindow {
 
 fn build_area(container: &GtkBox, modules: &[ModuleConfig]) {
     for module in modules {
-        let widget = modules::build_module(module);
-        container.append(&widget);
+        if let Some(widget) = modules::build_module(module) {
+            container.append(&widget);
+        } else {
+            eprintln!("Failed to initialize module: {module:?}");
+        }
     }
 }
 

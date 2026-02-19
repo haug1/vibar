@@ -4,8 +4,24 @@ use std::process::Command;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Button, Label, Orientation};
+use gtk::{Box as GtkBox, Button, Label, Orientation, Widget};
 use swayipc::{Connection, EventType};
+
+use crate::config::ModuleConfig;
+use crate::modules::ModuleFactory;
+
+pub(crate) struct SwayWorkspaceFactory;
+
+pub(crate) const FACTORY: SwayWorkspaceFactory = SwayWorkspaceFactory;
+
+impl ModuleFactory for SwayWorkspaceFactory {
+    fn init(&self, config: &ModuleConfig) -> Option<Widget> {
+        match config {
+            ModuleConfig::Workspaces => Some(build_workspaces_module().upcast()),
+            _ => None,
+        }
+    }
+}
 
 pub(crate) fn build_workspaces_module() -> GtkBox {
     let container = GtkBox::new(Orientation::Horizontal, 4);

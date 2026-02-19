@@ -2,9 +2,32 @@ use std::process::Command;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::Label;
+use gtk::{Label, Widget};
+
+use crate::config::ModuleConfig;
+
+use super::ModuleFactory;
 
 const MIN_EXEC_INTERVAL_SECS: u32 = 1;
+
+pub(crate) struct ExecFactory;
+
+pub(crate) const FACTORY: ExecFactory = ExecFactory;
+
+impl ModuleFactory for ExecFactory {
+    fn init(&self, config: &ModuleConfig) -> Option<Widget> {
+        let ModuleConfig::Exec {
+            command,
+            interval_secs,
+            class,
+        } = config
+        else {
+            return None;
+        };
+
+        Some(build_exec_module(command.clone(), *interval_secs, class.clone()).upcast())
+    }
+}
 
 pub(crate) fn build_exec_module(
     command: String,
