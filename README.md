@@ -111,6 +111,30 @@ Module schema:
 - `exec`: `{ "type": "exec", "command": "your shell command", "interval_secs": 5, "class": "optional-css-class" }`
   - `interval_secs` defaults to `5` and values below `1` are clamped to `1`
 
+## Module Architecture
+
+- Runtime module dispatch is string-keyed by `type` (e.g. `exec`, `clock`, `workspaces`).
+- `src/modules/mod.rs` stores raw module config entries:
+  - `type: String`
+  - module-specific fields as a dynamic map (`serde_json::Map<String, Value>`)
+- Each module file owns:
+  - its type constant (e.g. `MODULE_TYPE`)
+  - typed config struct
+  - config parsing from raw map
+  - widget initialization
+- `modules::build_module(...)` finds the registered factory by module type and initializes it.
+
+## Adding A Module
+
+1. Create a module file under `src/modules/` (or subfolder like `src/modules/sway/`).
+2. Add a `MODULE_TYPE` constant and typed config struct in that file.
+3. Implement `ModuleFactory` for that module's factory:
+   - `module_type()` returns `MODULE_TYPE`
+   - `init()` parses the raw config map and builds the widget
+4. Register the factory in `src/modules/mod.rs` `FACTORIES`.
+5. Add a `default_module_config()` helper if it should appear in built-in defaults.
+6. Update docs/example config and run `make ci`.
+
 ## Styling
 
 `style.css` in the repository is the default maintained theme and is always loaded.

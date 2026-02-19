@@ -6,6 +6,7 @@ use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, Orientation, Widget};
 use serde::Deserialize;
+use serde_json::{Map, Value};
 use swayipc::{Connection, EventType};
 
 use crate::modules::ModuleConfig;
@@ -17,17 +18,33 @@ pub(crate) struct WorkspaceConfig {}
 pub(crate) struct SwayWorkspaceFactory;
 
 pub(crate) const FACTORY: SwayWorkspaceFactory = SwayWorkspaceFactory;
+pub(crate) const MODULE_TYPE: &str = "workspaces";
 
 impl ModuleFactory for SwayWorkspaceFactory {
-    fn init(&self, config: &ModuleConfig) -> Option<Widget> {
-        match config {
-            ModuleConfig::Workspaces { config } => {
-                let _ = config;
-                Some(build_workspaces_module().upcast())
-            }
-            _ => None,
-        }
+    fn module_type(&self) -> &'static str {
+        MODULE_TYPE
     }
+
+    fn init(&self, config: &ModuleConfig) -> Result<Widget, String> {
+        let _ = parse_config(config)?;
+        Ok(build_workspaces_module().upcast())
+    }
+}
+
+pub(crate) fn default_module_config() -> ModuleConfig {
+    ModuleConfig::new(MODULE_TYPE, Map::new())
+}
+
+fn parse_config(module: &ModuleConfig) -> Result<WorkspaceConfig, String> {
+    if module.module_type != MODULE_TYPE {
+        return Err(format!(
+            "expected module type '{}', got '{}'",
+            MODULE_TYPE, module.module_type
+        ));
+    }
+
+    serde_json::from_value(Value::Object(module.config.clone()))
+        .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
 pub(crate) fn build_workspaces_module() -> GtkBox {

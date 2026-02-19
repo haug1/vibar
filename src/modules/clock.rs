@@ -3,12 +3,14 @@ use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
+use serde_json::{Map, Value};
 
 use crate::modules::ModuleConfig;
 
 use super::ModuleFactory;
 
 const DEFAULT_CLOCK_FMT: &str = "%a %d. %b %H:%M:%S";
+pub(crate) const MODULE_TYPE: &str = "clock";
 
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct ClockConfig {
@@ -21,13 +23,32 @@ pub(crate) struct ClockFactory;
 pub(crate) const FACTORY: ClockFactory = ClockFactory;
 
 impl ModuleFactory for ClockFactory {
-    fn init(&self, config: &ModuleConfig) -> Option<Widget> {
-        let ModuleConfig::Clock { config } = config else {
-            return None;
-        };
-
-        Some(build_clock_module(config.format.clone()).upcast())
+    fn module_type(&self) -> &'static str {
+        MODULE_TYPE
     }
+
+    fn init(&self, config: &ModuleConfig) -> Result<Widget, String> {
+        let parsed = parse_config(config)?;
+        Ok(build_clock_module(parsed.format).upcast())
+    }
+}
+
+pub(crate) fn default_module_config() -> ModuleConfig {
+    let mut map = Map::new();
+    map.insert("format".to_string(), Value::Null);
+    ModuleConfig::new(MODULE_TYPE, map)
+}
+
+fn parse_config(module: &ModuleConfig) -> Result<ClockConfig, String> {
+    if module.module_type != MODULE_TYPE {
+        return Err(format!(
+            "expected module type '{}', got '{}'",
+            MODULE_TYPE, module.module_type
+        ));
+    }
+
+    serde_json::from_value(Value::Object(module.config.clone()))
+        .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
 pub(crate) fn build_clock_module(format: Option<String>) -> Label {

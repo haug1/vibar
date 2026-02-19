@@ -67,10 +67,11 @@ fn build_window(app: &Application, config: &Config) -> ApplicationWindow {
 
 fn build_area(container: &GtkBox, modules: &[ModuleConfig]) {
     for module in modules {
-        if let Some(widget) = modules::build_module(module) {
-            container.append(&widget);
-        } else {
-            eprintln!("Failed to initialize module: {module:?}");
+        match modules::build_module(module) {
+            Ok(widget) => container.append(&widget),
+            Err(err) => {
+                eprintln!("Failed to initialize module {module:?}: {err}");
+            }
         }
     }
 }
@@ -93,10 +94,9 @@ mod tests {
             config::parse_config(r#"{ areas: { left: [{ type: "exec", command: "echo ok" }] } }"#)
                 .expect("config should parse");
 
-        match &cfg.areas.left[0] {
-            ModuleConfig::Exec { config } => assert_eq!(config.interval_secs, 5),
-            _ => panic!("expected exec module"),
-        }
+        let exec_cfg =
+            modules::exec::parse_config(&cfg.areas.left[0]).expect("exec config expected");
+        assert_eq!(exec_cfg.interval_secs, 5);
     }
 
     #[test]

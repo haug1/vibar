@@ -592,6 +592,7 @@ dependencies = [
  "gtk4-layer-shell",
  "json5",
  "serde",
+ "serde_json",
  "swayipc",
 ]
 

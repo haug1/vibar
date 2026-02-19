@@ -4,12 +4,14 @@ use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::modules::ModuleConfig;
 
 use super::ModuleFactory;
 
 const MIN_EXEC_INTERVAL_SECS: u32 = 1;
+pub(crate) const MODULE_TYPE: &str = "exec";
 
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct ExecConfig {
@@ -29,20 +31,26 @@ pub(crate) struct ExecFactory;
 pub(crate) const FACTORY: ExecFactory = ExecFactory;
 
 impl ModuleFactory for ExecFactory {
-    fn init(&self, config: &ModuleConfig) -> Option<Widget> {
-        let ModuleConfig::Exec { config } = config else {
-            return None;
-        };
-
-        Some(
-            build_exec_module(
-                config.command.clone(),
-                config.interval_secs,
-                config.class.clone(),
-            )
-            .upcast(),
-        )
+    fn module_type(&self) -> &'static str {
+        MODULE_TYPE
     }
+
+    fn init(&self, config: &ModuleConfig) -> Result<Widget, String> {
+        let parsed = parse_config(config)?;
+        Ok(build_exec_module(parsed.command, parsed.interval_secs, parsed.class).upcast())
+    }
+}
+
+pub(crate) fn parse_config(module: &ModuleConfig) -> Result<ExecConfig, String> {
+    if module.module_type != MODULE_TYPE {
+        return Err(format!(
+            "expected module type '{}', got '{}'",
+            MODULE_TYPE, module.module_type
+        ));
+    }
+
+    serde_json::from_value(Value::Object(module.config.clone()))
+        .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
 pub(crate) fn build_exec_module(
