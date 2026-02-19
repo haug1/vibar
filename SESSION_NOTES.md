@@ -37,7 +37,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Config parsing/models: `src/config.rs`
 - Style loading: `src/style.rs`
 - Module builders: `src/modules/`
-- Workspace module: `src/workspaces.rs`
+- Workspace module: `src/modules/sway/workspace.rs`
 - Rust deps: `Cargo.toml`
 - Lockfile: `Cargo.lock`
 - Toolchain pin: `rust-toolchain.toml`

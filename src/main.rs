@@ -5,7 +5,6 @@ use gtk4_layer_shell::{Edge, Layer, LayerShell};
 mod config;
 mod modules;
 mod style;
-mod workspaces;
 
 use config::{load_config, Config, ModuleConfig};
 
@@ -81,7 +80,7 @@ fn build_area(container: &GtkBox, modules: &[ModuleConfig]) {
                 container.append(&widget);
             }
             ModuleConfig::Workspaces => {
-                let widget = workspaces::build_workspaces_module();
+                let widget = modules::sway::workspace::build_workspaces_module();
                 container.append(&widget);
             }
             ModuleConfig::Clock { format } => {
