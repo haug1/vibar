@@ -13,6 +13,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 
 - Bottom-anchored layer-shell bar
 - One bar window per connected monitor at startup
+- Bar window is configured as non-focusable (`KeyboardMode::None`, no focus-on-click)
 - 3 layout areas: `left`, `center`, `right`
 - Default modules:
   - `left`: sway workspaces

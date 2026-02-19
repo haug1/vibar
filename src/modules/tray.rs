@@ -56,6 +56,7 @@ struct TrayMenuEntry {
     enabled: bool,
     visible: bool,
     is_separator: bool,
+    submenu_hint: bool,
     children: Vec<TrayMenuEntry>,
 }
 
@@ -345,10 +346,27 @@ fn fetch_dbus_menu_model(destination: &str, item_path: &str) -> Option<TrayMenuM
         let _about_to_show: ZbusResult<bool> = menu_proxy.call("AboutToShow", &(0_i32,));
 
         let (_revision, root): (u32, TrayMenuLayout) = menu_proxy
-            .call("GetLayout", &(0_i32, 1_i32, Vec::<String>::new()))
+            .call("GetLayout", &(0_i32, -1_i32, Vec::<String>::new()))
             .ok()?;
 
-        root.2
+        let initial_entries = root
+            .2
+            .into_iter()
+            .filter_map(parse_menu_entry_node)
+            .collect::<Vec<_>>();
+
+        let mut submenu_ids = Vec::new();
+        collect_submenu_ids(&initial_entries, &mut submenu_ids);
+        for id in submenu_ids {
+            let _submenu_about_to_show: ZbusResult<bool> = menu_proxy.call("AboutToShow", &(id,));
+        }
+
+        let (_revision, refreshed_root): (u32, TrayMenuLayout) = menu_proxy
+            .call("GetLayout", &(0_i32, -1_i32, Vec::<String>::new()))
+            .ok()?;
+
+        refreshed_root
+            .2
             .into_iter()
             .filter_map(parse_menu_entry_node)
             .collect::<Vec<_>>()
@@ -364,6 +382,8 @@ fn parse_menu_entry_node(value: OwnedValue) -> Option<TrayMenuEntry> {
     let visible = read_bool_prop(&props, "visible").unwrap_or(true);
     let is_separator = read_string_prop(&props, "type")
         .is_some_and(|item_type| item_type.eq_ignore_ascii_case("separator"));
+    let submenu_hint = read_string_prop(&props, "children-display")
+        .is_some_and(|display| display.eq_ignore_ascii_case("submenu"));
     let children = children
         .into_iter()
         .filter_map(parse_menu_entry_node)
@@ -375,8 +395,18 @@ fn parse_menu_entry_node(value: OwnedValue) -> Option<TrayMenuEntry> {
         enabled,
         visible,
         is_separator,
+        submenu_hint,
         children,
     })
+}
+
+fn collect_submenu_ids(entries: &[TrayMenuEntry], ids: &mut Vec<i32>) {
+    for entry in entries {
+        if entry.submenu_hint {
+            ids.push(entry.id);
+        }
+        collect_submenu_ids(&entry.children, ids);
+    }
 }
 
 fn read_menu_label(props: &HashMap<String, OwnedValue>) -> String {

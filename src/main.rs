@@ -1,7 +1,7 @@
 use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Box as GtkBox, CenterBox, Orientation};
-use gtk4_layer_shell::{Edge, Layer, LayerShell};
+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 mod config;
 mod modules;
@@ -61,10 +61,13 @@ fn build_window(
 
     window.init_layer_shell();
     window.set_layer(Layer::Top);
+    window.set_keyboard_mode(KeyboardMode::None);
     window.set_anchor(Edge::Left, true);
     window.set_anchor(Edge::Right, true);
     window.set_anchor(Edge::Bottom, true);
     window.auto_exclusive_zone_enable();
+    window.set_focusable(false);
+    window.set_focus_on_click(false);
     if let Some(monitor) = monitor {
         window.set_monitor(Some(monitor));
     }
@@ -73,15 +76,23 @@ fn build_window(
         .orientation(Orientation::Horizontal)
         .build();
     root.add_css_class("bar");
+    root.set_focusable(false);
+    root.set_focus_on_click(false);
 
     let left = GtkBox::new(Orientation::Horizontal, 6);
     left.add_css_class("left");
+    left.set_focusable(false);
+    left.set_focus_on_click(false);
 
     let center = GtkBox::new(Orientation::Horizontal, 6);
     center.add_css_class("center");
+    center.set_focusable(false);
+    center.set_focus_on_click(false);
 
     let right = GtkBox::new(Orientation::Horizontal, 6);
     right.add_css_class("right");
+    right.set_focusable(false);
+    right.set_focus_on_click(false);
 
     build_area(&left, &config.areas.left);
     build_area(&center, &config.areas.center);
