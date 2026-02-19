@@ -6,7 +6,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 
 - Name: `mybar`
 - Goal: minimal Wayland taskbar app (Rust + GTK4 + `gtk4-layer-shell`)
-- Current status: MVP scaffold compiles (`make build`)
+- Current status: MVP scaffold passes CI (`make ci`)
 - Primary runtime target: sway/Wayland
 
 ## Core Behavior (MVP)
@@ -17,6 +17,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - `left`: sway workspaces
   - `right`: clock (updates every 1s)
 - Config-driven `exec` modules via `config.jsonc`
+  - `exec.interval_secs` defaults to `5` and is clamped to a minimum of `1`
 - Optional CSS load from `./style.css` (no error if missing)
 
 ## Standard Commands

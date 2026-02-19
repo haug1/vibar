@@ -14,19 +14,12 @@ use swayipc::Connection;
 const APP_ID: &str = "com.example.mybar";
 const CONFIG_PATH: &str = "./config.jsonc";
 const DEFAULT_CLOCK_FMT: &str = "%a %d. %b %H:%M:%S";
+const MIN_EXEC_INTERVAL_SECS: u32 = 1;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 struct Config {
     #[serde(default)]
     areas: Areas,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            areas: Areas::default(),
-        }
-    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -93,7 +86,7 @@ fn main() {
 
 fn load_config(path: &str) -> Config {
     match fs::read_to_string(path) {
-        Ok(content) => match json5::from_str::<Config>(&content) {
+        Ok(content) => match parse_config(&content) {
             Ok(cfg) => cfg,
             Err(err) => {
                 eprintln!("Failed to parse {path}: {err}");
@@ -102,6 +95,10 @@ fn load_config(path: &str) -> Config {
         },
         Err(_) => Config::default(),
     }
+}
+
+fn parse_config(content: &str) -> Result<Config, json5::Error> {
+    json5::from_str::<Config>(content)
 }
 
 fn load_optional_css() {
@@ -136,7 +133,9 @@ fn build_window(app: &Application, config: &Config) -> ApplicationWindow {
     window.set_anchor(Edge::Bottom, true);
     window.auto_exclusive_zone_enable();
 
-    let root = CenterBox::builder().orientation(Orientation::Horizontal).build();
+    let root = CenterBox::builder()
+        .orientation(Orientation::Horizontal)
+        .build();
     root.add_css_class("bar");
 
     let left = GtkBox::new(Orientation::Horizontal, 6);
@@ -187,6 +186,14 @@ fn build_exec_module(command: String, interval_secs: u32, class: Option<String>)
     let label = Label::new(None);
     label.add_css_class("module");
     label.add_css_class("exec");
+    let effective_interval_secs = normalized_exec_interval(interval_secs);
+
+    if effective_interval_secs != interval_secs {
+        eprintln!(
+            "exec interval_secs={} is too low; clamping to {} second",
+            interval_secs, effective_interval_secs
+        );
+    }
 
     if let Some(class_name) = class {
         label.add_css_class(&class_name);
@@ -206,12 +213,16 @@ fn build_exec_module(command: String, interval_secs: u32, class: Option<String>)
 
     trigger_exec_command(command.clone(), sender.clone());
 
-    glib::timeout_add_seconds_local(interval_secs, move || {
+    glib::timeout_add_seconds_local(effective_interval_secs, move || {
         trigger_exec_command(command.clone(), sender.clone());
         ControlFlow::Continue
     });
 
     label
+}
+
+fn normalized_exec_interval(interval_secs: u32) -> u32 {
+    interval_secs.max(MIN_EXEC_INTERVAL_SECS)
 }
 
 fn trigger_exec_command(command: String, sender: std::sync::mpsc::Sender<String>) {
@@ -325,4 +336,35 @@ fn build_clock_module(format: Option<String>) -> Label {
     });
 
     label
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_config_defaults_to_builtin_areas() {
+        let cfg = parse_config("{}").expect("config should parse");
+        assert_eq!(cfg.areas.left.len(), 1);
+        assert_eq!(cfg.areas.center.len(), 0);
+        assert_eq!(cfg.areas.right.len(), 1);
+    }
+
+    #[test]
+    fn parse_exec_module_uses_default_interval() {
+        let cfg = parse_config(r#"{ areas: { left: [{ type: "exec", command: "echo ok" }] } }"#)
+            .expect("config should parse");
+
+        match &cfg.areas.left[0] {
+            ModuleConfig::Exec { interval_secs, .. } => assert_eq!(*interval_secs, 5),
+            _ => panic!("expected exec module"),
+        }
+    }
+
+    #[test]
+    fn normalized_exec_interval_enforces_lower_bound() {
+        assert_eq!(normalized_exec_interval(0), 1);
+        assert_eq!(normalized_exec_interval(1), 1);
+        assert_eq!(normalized_exec_interval(10), 10);
+    }
 }

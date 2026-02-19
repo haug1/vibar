@@ -74,7 +74,7 @@ make ci
 - Module types:
   - `workspaces` (default in `left`, via sway IPC)
   - `clock` (default in `right`, updates every second on GTK main loop)
-  - `exec` (runs shell command periodically and displays output)
+  - `exec` (runs shell command periodically and displays output, minimum interval is 1 second)
 - Optional CSS loading from `./style.css` (ignored if missing)
 
 ## Runtime Notes
@@ -109,6 +109,7 @@ Module schema:
 - `workspaces`: `{ "type": "workspaces" }`
 - `clock`: `{ "type": "clock", "format": "%a %d. %b %H:%M:%S" }`
 - `exec`: `{ "type": "exec", "command": "your shell command", "interval_secs": 5, "class": "optional-css-class" }`
+  - `interval_secs` defaults to `5` and values below `1` are clamped to `1`
 
 ## Styling
 
