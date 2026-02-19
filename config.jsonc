@@ -6,6 +6,9 @@
       // interval_secs defaults to 5 and minimum is 1
       { "type": "exec", "command": "echo $RANDOM", "interval_secs": 5 },
     ],
-    "right": [{ "type": "clock", "format": "%a %d. %b %H:%M:%S" }],
+    "right": [
+      { "type": "tray", "icon_size": 16, "poll_interval_secs": 2 },
+      { "type": "clock", "format": "%a %d. %b %H:%M:%S" },
+    ],
   },
 }

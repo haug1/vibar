@@ -1,6 +1,7 @@
 pub(crate) mod clock;
 pub(crate) mod exec;
 pub(crate) mod sway;
+pub(crate) mod tray;
 
 use gtk::Widget;
 use serde::Deserialize;
@@ -28,8 +29,12 @@ pub(crate) trait ModuleFactory {
     fn init(&self, config: &ModuleConfig) -> Result<Widget, String>;
 }
 
-const FACTORIES: &[&dyn ModuleFactory] =
-    &[&exec::FACTORY, &sway::workspace::FACTORY, &clock::FACTORY];
+const FACTORIES: &[&dyn ModuleFactory] = &[
+    &exec::FACTORY,
+    &sway::workspace::FACTORY,
+    &clock::FACTORY,
+    &tray::FACTORY,
+];
 
 pub(crate) fn build_module(config: &ModuleConfig) -> Result<Widget, String> {
     let factory = FACTORIES

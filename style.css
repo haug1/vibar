@@ -54,6 +54,27 @@
   font-weight: 500;
 }
 
+.tray {
+  spacing: 4px;
+}
+
+.tray-item {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px;
+}
+
+.tray-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tray-item image {
+  color: #e6ebf5;
+}
+
 .workspace-status {
   color: #ff9090;
 }
