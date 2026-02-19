@@ -31,11 +31,15 @@ impl Default for Areas {
 }
 
 fn default_left() -> Vec<ModuleConfig> {
-    vec![ModuleConfig::Workspaces]
+    vec![ModuleConfig::Workspaces {
+        config: crate::modules::sway::workspace::WorkspaceConfig::default(),
+    }]
 }
 
 fn default_right() -> Vec<ModuleConfig> {
-    vec![ModuleConfig::Clock { format: None }]
+    vec![ModuleConfig::Clock {
+        config: crate::modules::clock::ClockConfig { format: None },
+    }]
 }
 
 pub(crate) fn load_config(path: &str) -> Config {

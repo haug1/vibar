@@ -3,6 +3,7 @@ use std::process::Command;
 use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
+use serde::Deserialize;
 
 use crate::modules::ModuleConfig;
 
@@ -10,22 +11,37 @@ use super::ModuleFactory;
 
 const MIN_EXEC_INTERVAL_SECS: u32 = 1;
 
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct ExecConfig {
+    pub(crate) command: String,
+    #[serde(default = "default_exec_interval")]
+    pub(crate) interval_secs: u32,
+    #[serde(default)]
+    pub(crate) class: Option<String>,
+}
+
+fn default_exec_interval() -> u32 {
+    5
+}
+
 pub(crate) struct ExecFactory;
 
 pub(crate) const FACTORY: ExecFactory = ExecFactory;
 
 impl ModuleFactory for ExecFactory {
     fn init(&self, config: &ModuleConfig) -> Option<Widget> {
-        let ModuleConfig::Exec {
-            command,
-            interval_secs,
-            class,
-        } = config
-        else {
+        let ModuleConfig::Exec { config } = config else {
             return None;
         };
 
-        Some(build_exec_module(command.clone(), *interval_secs, class.clone()).upcast())
+        Some(
+            build_exec_module(
+                config.command.clone(),
+                config.interval_secs,
+                config.class.clone(),
+            )
+            .upcast(),
+        )
     }
 }
 

@@ -9,21 +9,17 @@ use serde::Deserialize;
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub(crate) enum ModuleConfig {
     Exec {
-        command: String,
-        #[serde(default = "default_exec_interval")]
-        interval_secs: u32,
-        #[serde(default)]
-        class: Option<String>,
+        #[serde(flatten)]
+        config: exec::ExecConfig,
     },
-    Workspaces,
+    Workspaces {
+        #[serde(flatten)]
+        config: sway::workspace::WorkspaceConfig,
+    },
     Clock {
-        #[serde(default)]
-        format: Option<String>,
+        #[serde(flatten)]
+        config: clock::ClockConfig,
     },
-}
-
-fn default_exec_interval() -> u32 {
-    5
 }
 
 pub(crate) trait ModuleFactory {

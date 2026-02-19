@@ -5,10 +5,14 @@ use std::process::Command;
 use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, Orientation, Widget};
+use serde::Deserialize;
 use swayipc::{Connection, EventType};
 
 use crate::modules::ModuleConfig;
 use crate::modules::ModuleFactory;
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub(crate) struct WorkspaceConfig {}
 
 pub(crate) struct SwayWorkspaceFactory;
 
@@ -17,7 +21,10 @@ pub(crate) const FACTORY: SwayWorkspaceFactory = SwayWorkspaceFactory;
 impl ModuleFactory for SwayWorkspaceFactory {
     fn init(&self, config: &ModuleConfig) -> Option<Widget> {
         match config {
-            ModuleConfig::Workspaces => Some(build_workspaces_module().upcast()),
+            ModuleConfig::Workspaces { config } => {
+                let _ = config;
+                Some(build_workspaces_module().upcast())
+            }
             _ => None,
         }
     }

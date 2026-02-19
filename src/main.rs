@@ -94,7 +94,7 @@ mod tests {
                 .expect("config should parse");
 
         match &cfg.areas.left[0] {
-            ModuleConfig::Exec { interval_secs, .. } => assert_eq!(*interval_secs, 5),
+            ModuleConfig::Exec { config } => assert_eq!(config.interval_secs, 5),
             _ => panic!("expected exec module"),
         }
     }
