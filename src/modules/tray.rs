@@ -15,7 +15,7 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use zbus::Error as ZbusError;
 use zbus::Result as ZbusResult;
 
-use crate::modules::ModuleConfig;
+use crate::modules::{ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -77,7 +77,7 @@ impl ModuleFactory for TrayFactory {
         MODULE_TYPE
     }
 
-    fn init(&self, config: &ModuleConfig) -> Result<Widget, String> {
+    fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
         Ok(build_tray_module(parsed).upcast())
     }

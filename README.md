@@ -73,7 +73,7 @@ make ci
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Module types:
-  - `workspaces` (default in `left`, via sway IPC; updates immediately on workspace/output events)
+  - `workspaces` (default in `left`, via sway IPC; updates immediately on workspace/output events and only shows workspaces for the bar window's output)
   - `clock` (default in `right`, updates every second on GTK main loop)
   - `exec` (runs shell command periodically and displays output, minimum interval is 1 second; identical `command` + `interval_secs` instances share one backend poller across bar windows)
   - `tray` (StatusNotifier-based app tray; polls watcher items, activates on left click, requests context menu on right click)
@@ -81,7 +81,7 @@ make ci
 
 ## Runtime Notes
 
-Run under a Wayland compositor. The workspace module expects sway IPC and subscribes to sway events for immediate updates.
+Run under a Wayland compositor. The workspace module expects sway IPC and subscribes to sway events for immediate updates. Each bar window maps to a monitor connector and filters workspace buttons to that sway output.
 
 ## Configuration
 

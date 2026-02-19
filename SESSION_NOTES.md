@@ -18,6 +18,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Default modules:
   - `left`: sway workspaces
   - `right`: clock (updates every 1s)
+- Workspace lists are output-local per bar window (monitor connector -> sway output mapping)
 - Config-driven `exec` modules via `config.jsonc`
   - `exec.interval_secs` defaults to `5` and is clamped to a minimum of `1`
   - Identical `exec` modules (`command` + `interval_secs`) share one background poller across all monitor windows

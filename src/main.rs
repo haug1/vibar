@@ -8,7 +8,7 @@ mod modules;
 mod style;
 
 use config::{load_config, Config};
-use modules::ModuleConfig;
+use modules::{ModuleBuildContext, ModuleConfig};
 
 const APP_ID: &str = "com.example.mybar";
 const CONFIG_PATH: &str = "./config.jsonc";
@@ -94,9 +94,15 @@ fn build_window(
     right.set_focusable(false);
     right.set_focus_on_click(false);
 
-    build_area(&left, &config.areas.left);
-    build_area(&center, &config.areas.center);
-    build_area(&right, &config.areas.right);
+    let context = ModuleBuildContext {
+        monitor_connector: monitor
+            .and_then(|item| item.connector())
+            .map(|connector| connector.to_string()),
+    };
+
+    build_area(&left, &config.areas.left, &context);
+    build_area(&center, &config.areas.center, &context);
+    build_area(&right, &config.areas.right, &context);
 
     root.set_start_widget(Some(&left));
     root.set_center_widget(Some(&center));
@@ -106,9 +112,9 @@ fn build_window(
     window
 }
 
-fn build_area(container: &GtkBox, modules: &[ModuleConfig]) {
+fn build_area(container: &GtkBox, modules: &[ModuleConfig], context: &ModuleBuildContext) {
     for module in modules {
-        match modules::build_module(module) {
+        match modules::build_module(module, context) {
             Ok(widget) => container.append(&widget),
             Err(err) => {
                 eprintln!("Failed to initialize module {module:?}: {err}");

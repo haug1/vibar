@@ -5,7 +5,7 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::modules::ModuleConfig;
+use crate::modules::{ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -27,7 +27,7 @@ impl ModuleFactory for ClockFactory {
         MODULE_TYPE
     }
 
-    fn init(&self, config: &ModuleConfig) -> Result<Widget, String> {
+    fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
         Ok(build_clock_module(parsed.format).upcast())
     }
