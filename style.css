@@ -77,6 +77,16 @@
   padding: 4px;
 }
 
+/* Avoid GTK warnings when popover-internal scrollbar slider gizmos inherit
+   invalid negative mins from some themes. */
+.tray-menu-popover scrollbar slider {
+  min-width: 8px;
+  min-height: 8px;
+  margin: 0;
+  padding: 0;
+  border-width: 0;
+}
+
 .workspace-status {
   color: #ff9090;
 }
