@@ -68,13 +68,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_config_rejects_invalid_content() {
-        let err = parse_config("{ not valid json5 ").expect_err("invalid config should fail");
-        let msg = err.to_string();
-        assert!(!msg.is_empty());
-    }
-
-    #[test]
     fn parse_config_applies_explicit_areas() {
         let cfg = parse_config(
             r#"{

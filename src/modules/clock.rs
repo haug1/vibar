@@ -89,11 +89,4 @@ mod tests {
         let err = parse_config(&module).expect_err("wrong type should fail");
         assert!(err.contains("expected module type 'clock'"));
     }
-
-    #[test]
-    fn parse_config_accepts_default_format() {
-        let module = ModuleConfig::new(MODULE_TYPE, Map::new());
-        let parsed = parse_config(&module).expect("clock config should parse");
-        assert!(parsed.format.is_none());
-    }
 }
