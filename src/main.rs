@@ -66,28 +66,8 @@ fn build_window(app: &Application, config: &Config) -> ApplicationWindow {
 
 fn build_area(container: &GtkBox, modules: &[ModuleConfig]) {
     for module in modules {
-        match module {
-            ModuleConfig::Exec {
-                command,
-                interval_secs,
-                class,
-            } => {
-                let widget = modules::exec::build_exec_module(
-                    command.clone(),
-                    *interval_secs,
-                    class.clone(),
-                );
-                container.append(&widget);
-            }
-            ModuleConfig::Workspaces => {
-                let widget = modules::sway::workspace::build_workspaces_module();
-                container.append(&widget);
-            }
-            ModuleConfig::Clock { format } => {
-                let widget = modules::clock::build_clock_module(format.clone());
-                container.append(&widget);
-            }
-        }
+        let widget = modules::build_module(module);
+        container.append(&widget);
     }
 }
 
