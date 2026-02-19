@@ -72,14 +72,14 @@ make ci
 - Bottom-anchored layer-shell bar
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Module types:
-  - `workspaces` (default in `left`, via sway IPC)
+  - `workspaces` (default in `left`, via sway IPC; updates immediately on workspace/output events)
   - `clock` (default in `right`, updates every second on GTK main loop)
   - `exec` (runs shell command periodically and displays output, minimum interval is 1 second)
 - Default styling loaded from repo `style.css` (embedded at build time)
 
 ## Runtime Notes
 
-Run under a Wayland compositor. The workspace module expects sway IPC.
+Run under a Wayland compositor. The workspace module expects sway IPC and subscribes to sway events for immediate updates.
 
 ## Configuration
 

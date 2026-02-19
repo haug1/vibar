@@ -1,4 +1,6 @@
 use std::fs;
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
 use std::process::Command;
 
 use chrono::Local;
@@ -8,7 +10,7 @@ use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Box as GtkBox, Button, CenterBox, Label, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
 use serde::Deserialize;
-use swayipc::Connection;
+use swayipc::{Connection, EventType};
 
 const APP_ID: &str = "com.example.mybar";
 const CONFIG_PATH: &str = "./config.jsonc";
@@ -246,17 +248,106 @@ fn build_workspaces_module() -> GtkBox {
     container.add_css_class("module");
     container.add_css_class("workspaces");
 
+    let (mut signal_rx, signal_tx) = match std::os::unix::net::UnixStream::pair() {
+        Ok(pair) => pair,
+        Err(err) => {
+            eprintln!("mybar/workspaces: failed to create event signal pipe: {err}");
+            refresh_workspaces(&container);
+            return container;
+        }
+    };
+    if let Err(err) = signal_rx.set_nonblocking(true) {
+        eprintln!("mybar/workspaces: failed to set nonblocking event signal pipe: {err}");
+        refresh_workspaces(&container);
+        return container;
+    }
+
+    start_workspace_event_listener(signal_tx);
+
     refresh_workspaces(&container);
 
-    glib::timeout_add_seconds_local(1, {
-        let container = container.clone();
-        move || {
-            refresh_workspaces(&container);
-            ControlFlow::Continue
-        }
-    });
+    // Refresh only when the sway listener emits an event callback signal.
+    glib::source::unix_fd_add_local(
+        signal_rx.as_raw_fd(),
+        glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
+        {
+            let container = container.clone();
+            move |_, condition| {
+                if condition.intersects(glib::IOCondition::HUP | glib::IOCondition::ERR) {
+                    if workspace_debug_enabled() {
+                        eprintln!("mybar/workspaces: event signal pipe closed");
+                    }
+                    return ControlFlow::Break;
+                }
+
+                let mut had_event = false;
+                let mut buf = [0_u8; 64];
+                loop {
+                    match signal_rx.read(&mut buf) {
+                        Ok(0) => {
+                            if workspace_debug_enabled() {
+                                eprintln!("mybar/workspaces: event signal pipe reached EOF");
+                            }
+                            return ControlFlow::Break;
+                        }
+                        Ok(_) => had_event = true,
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => break,
+                        Err(err) => {
+                            eprintln!("mybar/workspaces: failed to read event signal pipe: {err}");
+                            return ControlFlow::Break;
+                        }
+                    }
+                }
+
+                if had_event {
+                    refresh_workspaces(&container);
+                }
+                ControlFlow::Continue
+            }
+        },
+    );
 
     container
+}
+
+fn start_workspace_event_listener(mut signal_tx: std::os::unix::net::UnixStream) {
+    std::thread::spawn(move || loop {
+        let connection = match Connection::new() {
+            Ok(conn) => conn,
+            Err(err) => {
+                if workspace_debug_enabled() {
+                    eprintln!("mybar/workspaces: failed to connect for events: {err}");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                continue;
+            }
+        };
+
+        let stream = match connection.subscribe([EventType::Workspace, EventType::Output]) {
+            Ok(stream) => stream,
+            Err(err) => {
+                if workspace_debug_enabled() {
+                    eprintln!("mybar/workspaces: failed to subscribe to events: {err}");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                continue;
+            }
+        };
+
+        for event in stream {
+            if workspace_debug_enabled() {
+                eprintln!("mybar/workspaces: event={event:?}");
+            }
+            if signal_tx.write_all(&[1]).is_err() {
+                return;
+            }
+        }
+
+        if workspace_debug_enabled() {
+            eprintln!("mybar/workspaces: event stream ended, reconnecting");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    });
 }
 
 fn refresh_workspaces(container: &GtkBox) {

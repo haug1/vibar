@@ -20,6 +20,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - `exec.interval_secs` defaults to `5` and is clamped to a minimum of `1`
 - Default CSS comes from repo `style.css` (embedded at build time)
 - Workspaces active detection prefers sway `get_tree()` focus with fallback to `get_workspaces().focused`
+- Workspace module subscribes to sway workspace/output events for event-driven refresh
 - Workspace debug logging can be enabled with `MYBAR_DEBUG_WORKSPACES=1`
 
 ## Standard Commands
