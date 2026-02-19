@@ -1,0 +1,14 @@
+{
+  // Optional. Remove this file to use built-in defaults.
+  areas: {
+    left: [
+      { type: "workspaces" }
+    ],
+    center: [
+      // { type: "exec", command: "echo hello", interval_secs: 2 }
+    ],
+    right: [
+      { type: "clock", format: "%a %d. %b %H:%M:%S" }
+    ]
+  }
+}
