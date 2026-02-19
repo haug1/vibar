@@ -4,7 +4,7 @@ use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 
-use crate::config::ModuleConfig;
+use crate::modules::ModuleConfig;
 
 use super::ModuleFactory;
 

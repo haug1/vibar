@@ -6,7 +6,8 @@ mod config;
 mod modules;
 mod style;
 
-use config::{load_config, Config, ModuleConfig};
+use config::{load_config, Config};
+use modules::ModuleConfig;
 
 const APP_ID: &str = "com.example.mybar";
 const CONFIG_PATH: &str = "./config.jsonc";

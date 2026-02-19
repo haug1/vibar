@@ -37,6 +37,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Config parsing/models: `src/config.rs`
 - Style loading: `src/style.rs`
 - Module builders: `src/modules/`
+  - `ModuleConfig` is declared in `src/modules/mod.rs` (co-located with module system)
   - Each module owns its own `ModuleFactory::init` implementation; `modules::build_module` just routes to registered factories.
 - Workspace module: `src/modules/sway/workspace.rs`
 - Rust deps: `Cargo.toml`

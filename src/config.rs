@@ -2,6 +2,8 @@ use std::fs;
 
 use serde::Deserialize;
 
+use crate::modules::ModuleConfig;
+
 #[derive(Debug, Deserialize, Clone, Default)]
 pub(crate) struct Config {
     #[serde(default)]
@@ -34,27 +36,6 @@ fn default_left() -> Vec<ModuleConfig> {
 
 fn default_right() -> Vec<ModuleConfig> {
     vec![ModuleConfig::Clock { format: None }]
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-pub(crate) enum ModuleConfig {
-    Exec {
-        command: String,
-        #[serde(default = "default_exec_interval")]
-        interval_secs: u32,
-        #[serde(default)]
-        class: Option<String>,
-    },
-    Workspaces,
-    Clock {
-        #[serde(default)]
-        format: Option<String>,
-    },
-}
-
-fn default_exec_interval() -> u32 {
-    5
 }
 
 pub(crate) fn load_config(path: &str) -> Config {

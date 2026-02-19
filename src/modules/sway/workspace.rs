@@ -7,7 +7,7 @@ use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, Orientation, Widget};
 use swayipc::{Connection, EventType};
 
-use crate::config::ModuleConfig;
+use crate::modules::ModuleConfig;
 use crate::modules::ModuleFactory;
 
 pub(crate) struct SwayWorkspaceFactory;
