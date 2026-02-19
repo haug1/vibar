@@ -76,7 +76,7 @@ make ci
   - `workspaces` (default in `left`, via sway IPC; updates immediately on workspace/output events)
   - `clock` (default in `right`, updates every second on GTK main loop)
   - `exec` (runs shell command periodically and displays output, minimum interval is 1 second; identical `command` + `interval_secs` instances share one backend poller across bar windows)
-  - `tray` (StatusNotifier-based app tray; polls watcher items and activates item on click)
+  - `tray` (StatusNotifier-based app tray; polls watcher items, activates on left click, requests context menu on right click)
 - Default styling loaded from repo `style.css` (embedded at build time)
 
 ## Runtime Notes
@@ -116,6 +116,9 @@ Module schema:
 - `tray`: `{ "type": "tray", "icon_size": 16, "poll_interval_secs": 2, "class": "optional-css-class" }`
   - `icon_size` defaults to `16` and values below `8` are clamped
   - `poll_interval_secs` defaults to `2` and values below `1` are clamped
+  - left click: calls SNI `Activate`
+  - right click: calls SNI `ContextMenu`
+  - middle click: calls SNI `SecondaryActivate`
   - current implementation uses `IconName`/`AttentionIconName` for icons (icon pixmap fallback is not implemented yet)
 
 ## Module Architecture
@@ -167,4 +170,5 @@ Suggested selectors:
 
 - Dynamic monitor hotplug handling (add/remove bars at runtime)
 - More module types and robust module lifecycle
+- StatusNotifier `IconPixmap` fallback for apps without icon names
 - Better config discovery/reload

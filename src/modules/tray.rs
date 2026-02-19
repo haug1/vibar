@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Button, Image, Orientation, Widget};
+use gtk::{Box as GtkBox, Button, GestureClick, Image, Orientation, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 use zbus::blocking::{Connection, Proxy};
@@ -158,11 +158,39 @@ fn render_tray_items(container: &GtkBox, items: &[TrayItemSnapshot], icon_size: 
             activate_item(destination.clone(), path.clone());
         });
 
+        let destination = item.destination.clone();
+        let path = item.path.clone();
+        let right_click = GestureClick::builder().button(3).build();
+        right_click.connect_pressed(move |_, _, x, y| {
+            context_menu_item(destination.clone(), path.clone(), x as i32, y as i32);
+        });
+        button.add_controller(right_click);
+
+        let destination = item.destination.clone();
+        let path = item.path.clone();
+        let middle_click = GestureClick::builder().button(2).build();
+        middle_click.connect_pressed(move |_, _, x, y| {
+            secondary_activate_item(destination.clone(), path.clone(), x as i32, y as i32);
+        });
+        button.add_controller(middle_click);
+
         container.append(&button);
     }
 }
 
 fn activate_item(destination: String, path: String) {
+    call_item_method(destination, path, "Activate", 0, 0);
+}
+
+fn context_menu_item(destination: String, path: String, x: i32, y: i32) {
+    call_item_method(destination, path, "ContextMenu", x, y);
+}
+
+fn secondary_activate_item(destination: String, path: String, x: i32, y: i32) {
+    call_item_method(destination, path, "SecondaryActivate", x, y);
+}
+
+fn call_item_method(destination: String, path: String, method: &'static str, x: i32, y: i32) {
     thread::spawn(move || {
         let Ok(connection) = Connection::session() else {
             return;
@@ -177,7 +205,7 @@ fn activate_item(destination: String, path: String) {
             return;
         };
 
-        let _activate_result: ZbusResult<()> = proxy.call("Activate", &(0_i32, 0_i32));
+        let _result: ZbusResult<()> = proxy.call(method, &(x, y));
     });
 }
 

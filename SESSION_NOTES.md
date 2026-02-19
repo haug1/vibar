@@ -22,7 +22,8 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - Identical `exec` modules (`command` + `interval_secs`) share one background poller across all monitor windows
 - Config-driven `tray` module via `config.jsonc`
   - polls `org.kde.StatusNotifierWatcher` for tray items
-  - renders icon-name based tray buttons and calls item `Activate` on click
+  - renders icon-name based tray buttons
+  - left click calls item `Activate`, right click calls `ContextMenu`, middle click calls `SecondaryActivate`
   - `icon_size` defaults to `16` (min `8`), `poll_interval_secs` defaults to `2` (min `1`)
 - Default CSS comes from repo `style.css` (embedded at build time)
 - Workspaces active detection prefers sway `get_tree()` focus with fallback to `get_workspaces().focused`
