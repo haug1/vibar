@@ -19,6 +19,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - `right`: clock (updates every 1s)
 - Config-driven `exec` modules via `config.jsonc`
   - `exec.interval_secs` defaults to `5` and is clamped to a minimum of `1`
+  - Identical `exec` modules (`command` + `interval_secs`) share one background poller across all monitor windows
 - Default CSS comes from repo `style.css` (embedded at build time)
 - Workspaces active detection prefers sway `get_tree()` focus with fallback to `get_workspaces().focused`
 - Workspace module subscribes to sway workspace/output events for event-driven refresh

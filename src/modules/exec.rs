@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::process::Command;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
@@ -74,7 +77,7 @@ pub(crate) fn build_exec_module(
         label.add_css_class(&class_name);
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<String>();
+    let receiver = subscribe_shared_exec_output(command, effective_interval_secs);
 
     glib::timeout_add_local(std::time::Duration::from_millis(200), {
         let label = label.clone();
@@ -86,13 +89,6 @@ pub(crate) fn build_exec_module(
         }
     });
 
-    trigger_exec_command(command.clone(), sender.clone());
-
-    glib::timeout_add_seconds_local(effective_interval_secs, move || {
-        trigger_exec_command(command.clone(), sender.clone());
-        ControlFlow::Continue
-    });
-
     label
 }
 
@@ -100,24 +96,104 @@ pub(crate) fn normalized_exec_interval(interval_secs: u32) -> u32 {
     interval_secs.max(MIN_EXEC_INTERVAL_SECS)
 }
 
-fn trigger_exec_command(command: String, sender: std::sync::mpsc::Sender<String>) {
-    std::thread::spawn(move || {
-        let text = match Command::new("sh").arg("-c").arg(&command).output() {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ExecSharedKey {
+    command: String,
+    interval_secs: u32,
+}
 
-                if !stdout.is_empty() {
-                    stdout
-                } else if !stderr.is_empty() {
-                    stderr
-                } else {
-                    String::new()
-                }
-            }
-            Err(err) => format!("exec error: {err}"),
-        };
+#[derive(Default)]
+struct SharedExecBackend {
+    latest: Mutex<Option<String>>,
+    subscribers: Mutex<Vec<std::sync::mpsc::Sender<String>>>,
+}
 
-        let _ = sender.send(text);
+impl SharedExecBackend {
+    fn add_subscriber(&self, sender: std::sync::mpsc::Sender<String>) {
+        if let Some(text) = self
+            .latest
+            .lock()
+            .expect("exec backend latest mutex poisoned")
+            .clone()
+        {
+            let _ = sender.send(text);
+        }
+
+        self.subscribers
+            .lock()
+            .expect("exec backend subscribers mutex poisoned")
+            .push(sender);
+    }
+
+    fn broadcast(&self, text: String) {
+        *self
+            .latest
+            .lock()
+            .expect("exec backend latest mutex poisoned") = Some(text.clone());
+
+        self.subscribers
+            .lock()
+            .expect("exec backend subscribers mutex poisoned")
+            .retain(|sender| sender.send(text.clone()).is_ok());
+    }
+}
+
+type SharedExecMap = HashMap<ExecSharedKey, Arc<SharedExecBackend>>;
+
+fn shared_exec_backends() -> &'static Mutex<SharedExecMap> {
+    static SHARED_EXEC_BACKENDS: OnceLock<Mutex<SharedExecMap>> = OnceLock::new();
+    SHARED_EXEC_BACKENDS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn subscribe_shared_exec_output(
+    command: String,
+    interval_secs: u32,
+) -> std::sync::mpsc::Receiver<String> {
+    let key = ExecSharedKey {
+        command,
+        interval_secs,
+    };
+    let backend = {
+        let mut backends = shared_exec_backends()
+            .lock()
+            .expect("exec backend map mutex poisoned");
+
+        if let Some(existing) = backends.get(&key) {
+            Arc::clone(existing)
+        } else {
+            let backend = Arc::new(SharedExecBackend::default());
+            start_shared_exec_worker(key.clone(), Arc::clone(&backend));
+            backends.insert(key, Arc::clone(&backend));
+            backend
+        }
+    };
+
+    let (sender, receiver) = std::sync::mpsc::channel::<String>();
+    backend.add_subscriber(sender);
+    receiver
+}
+
+fn start_shared_exec_worker(key: ExecSharedKey, backend: Arc<SharedExecBackend>) {
+    std::thread::spawn(move || loop {
+        backend.broadcast(run_exec_command(&key.command));
+        std::thread::sleep(Duration::from_secs(u64::from(key.interval_secs)));
     });
+}
+
+fn run_exec_command(command: &str) -> String {
+    match Command::new("sh").arg("-c").arg(command).output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+            if !stdout.is_empty() {
+                stdout
+            } else if !stderr.is_empty() {
+                stderr
+            } else {
+                String::new()
+            }
+        }
+        Err(err) => format!("exec error: {err}"),
+    }
 }
