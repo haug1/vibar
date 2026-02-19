@@ -77,6 +77,15 @@
   padding: 4px;
 }
 
+.tray-menu-item {
+  min-height: 26px;
+  padding: 4px 8px;
+}
+
+.tray-menu-item label {
+  text-align: left;
+}
+
 /* Avoid GTK warnings when popover-internal scrollbar slider gizmos inherit
    invalid negative mins from some themes. */
 .tray-menu-popover scrollbar slider {

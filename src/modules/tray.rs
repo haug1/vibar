@@ -1,12 +1,14 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::thread;
 use std::time::Duration;
 
-use gio::{Menu as GioMenu, SimpleAction, SimpleActionGroup};
 use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{
-    Box as GtkBox, Button, GestureClick, Image, Orientation, PopoverMenu, PositionType, Widget,
+    Box as GtkBox, Button, GestureClick, Image, Label, Orientation, Popover, PositionType,
+    Separator, Widget,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -53,6 +55,8 @@ struct TrayItemSnapshot {
 struct TrayMenuEntry {
     id: i32,
     label: String,
+    icon_name: Option<String>,
+    icon_data: Option<Vec<u8>>,
     enabled: bool,
     visible: bool,
     is_separator: bool,
@@ -224,29 +228,31 @@ fn show_item_menu(anchor: &Button, destination: String, path: String) -> bool {
         return false;
     }
 
-    let action_group = SimpleActionGroup::new();
-    let menu_model = GioMenu::new();
-    append_entries_to_menu_model(
-        &menu_model,
-        &model.entries,
-        &action_group,
-        &destination,
-        &model.menu_path,
-    );
-    if menu_model.n_items() == 0 {
+    if !has_visible_menu_entries(&model.entries) {
         return false;
     }
 
-    let popover = PopoverMenu::from_model(Some(&menu_model));
+    let popover = Popover::new();
     popover.add_css_class("tray-menu-popover");
     popover.set_has_arrow(true);
     popover.set_autohide(true);
     popover.set_position(PositionType::Top);
-    popover.insert_action_group("traymenu", Some(&action_group));
     popover.set_parent(anchor);
+    let content = GtkBox::new(Orientation::Vertical, 2);
+    content.add_css_class("tray-menu-content");
+    popover.set_child(Some(&content));
+
+    let levels = Rc::new(RefCell::new(vec![model.entries]));
+    render_menu_level(&content, &popover, &destination, &model.menu_path, &levels);
     popover.popup();
 
     true
+}
+
+fn has_visible_menu_entries(entries: &[TrayMenuEntry]) -> bool {
+    entries
+        .iter()
+        .any(|entry| entry.visible && !entry.is_separator)
 }
 
 fn secondary_activate_item(destination: String, path: String, x: i32, y: i32) {
@@ -378,6 +384,8 @@ fn fetch_dbus_menu_model(destination: &str, item_path: &str) -> Option<TrayMenuM
 fn parse_menu_entry_node(value: OwnedValue) -> Option<TrayMenuEntry> {
     let (id, props, children): TrayMenuLayout = value.try_into().ok()?;
     let label = read_menu_label(&props);
+    let icon_name = read_string_prop(&props, "icon-name").filter(|value| !value.is_empty());
+    let icon_data = read_bytes_prop(&props, "icon-data").filter(|value| !value.is_empty());
     let enabled = read_bool_prop(&props, "enabled").unwrap_or(true);
     let visible = read_bool_prop(&props, "visible").unwrap_or(true);
     let is_separator = read_string_prop(&props, "type")
@@ -392,6 +400,8 @@ fn parse_menu_entry_node(value: OwnedValue) -> Option<TrayMenuEntry> {
     Some(TrayMenuEntry {
         id,
         label,
+        icon_name,
+        icon_data,
         enabled,
         visible,
         is_separator,
@@ -429,71 +439,149 @@ fn read_bool_prop(props: &HashMap<String, OwnedValue>, key: &str) -> Option<bool
     props.get(key).and_then(|value| bool::try_from(value).ok())
 }
 
-fn append_entries_to_menu_model(
-    menu: &GioMenu,
-    entries: &[TrayMenuEntry],
-    action_group: &SimpleActionGroup,
+fn read_bytes_prop(props: &HashMap<String, OwnedValue>, key: &str) -> Option<Vec<u8>> {
+    props
+        .get(key)
+        .and_then(|value| value.try_clone().ok())
+        .and_then(|value| Vec::<u8>::try_from(value).ok())
+}
+
+fn image_from_icon_data(data: &[u8]) -> Option<Image> {
+    let loader = gtk::gdk_pixbuf::PixbufLoader::new();
+    loader.write(data).ok()?;
+    loader.close().ok()?;
+    let pixbuf = loader.pixbuf()?;
+    let texture = gtk::gdk::Texture::for_pixbuf(&pixbuf);
+    let image = Image::from_paintable(Some(&texture));
+    image.set_pixel_size(DEFAULT_ICON_SIZE);
+    Some(image)
+}
+
+fn render_menu_level(
+    container: &GtkBox,
+    popover: &Popover,
     destination: &str,
     menu_path: &str,
+    levels: &Rc<RefCell<Vec<Vec<TrayMenuEntry>>>>,
 ) {
-    let mut section = GioMenu::new();
-    let mut section_has_items = false;
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
 
-    for entry in entries {
+    let current_level = {
+        let borrowed = levels.borrow();
+        borrowed.last().cloned().unwrap_or_default()
+    };
+
+    if levels.borrow().len() > 1 {
+        let back = Button::new();
+        back.add_css_class("tray-menu-item");
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        let icon = Image::from_icon_name("go-previous-symbolic");
+        icon.set_pixel_size(DEFAULT_ICON_SIZE);
+        row.append(&icon);
+        let label = Label::new(Some("Back"));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        row.append(&label);
+        back.set_child(Some(&row));
+
+        let container_clone = container.clone();
+        let popover_clone = popover.clone();
+        let destination_clone = destination.to_string();
+        let menu_path_clone = menu_path.to_string();
+        let levels_clone = levels.clone();
+        back.connect_clicked(move |_| {
+            {
+                let mut borrowed = levels_clone.borrow_mut();
+                if borrowed.len() > 1 {
+                    borrowed.pop();
+                }
+            }
+            render_menu_level(
+                &container_clone,
+                &popover_clone,
+                &destination_clone,
+                &menu_path_clone,
+                &levels_clone,
+            );
+        });
+        container.append(&back);
+
+        let separator = Separator::new(Orientation::Horizontal);
+        container.append(&separator);
+    }
+
+    let mut previous_was_separator = true;
+    for entry in current_level {
         if !entry.visible {
             continue;
         }
 
         if entry.is_separator {
-            if section_has_items {
-                menu.append_section(None, &section);
-                section = GioMenu::new();
-                section_has_items = false;
+            if previous_was_separator {
+                continue;
             }
+            let separator = Separator::new(Orientation::Horizontal);
+            container.append(&separator);
+            previous_was_separator = true;
             continue;
         }
+
+        let button = Button::new();
+        button.add_css_class("tray-menu-item");
+        button.set_sensitive(entry.enabled);
+
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        if let Some(icon_name) = &entry.icon_name {
+            let icon = Image::from_icon_name(icon_name);
+            icon.set_pixel_size(DEFAULT_ICON_SIZE);
+            row.append(&icon);
+        } else if let Some(icon_data) = &entry.icon_data {
+            if let Some(icon) = image_from_icon_data(icon_data) {
+                row.append(&icon);
+            }
+        }
+        let label = Label::new(Some(&entry.label));
+        label.set_xalign(0.0);
+        label.set_hexpand(true);
+        row.append(&label);
+        if !entry.children.is_empty() {
+            let chevron = Label::new(Some("›"));
+            row.append(&chevron);
+        }
+        button.set_child(Some(&row));
 
         if !entry.children.is_empty() {
-            let submenu = GioMenu::new();
-            append_entries_to_menu_model(
-                &submenu,
-                &entry.children,
-                action_group,
-                destination,
-                menu_path,
-            );
-            if submenu.n_items() > 0 {
-                section.append_submenu(Some(&entry.label), &submenu);
-                section_has_items = true;
-            }
-            continue;
+            let children = entry.children.clone();
+            let container_clone = container.clone();
+            let popover_clone = popover.clone();
+            let destination_clone = destination.to_string();
+            let menu_path_clone = menu_path.to_string();
+            let levels_clone = levels.clone();
+            button.connect_clicked(move |_| {
+                levels_clone.borrow_mut().push(children.clone());
+                render_menu_level(
+                    &container_clone,
+                    &popover_clone,
+                    &destination_clone,
+                    &menu_path_clone,
+                    &levels_clone,
+                );
+            });
+        } else {
+            let destination_clone = destination.to_string();
+            let menu_path_clone = menu_path.to_string();
+            let popover_clone = popover.clone();
+            let id = entry.id;
+            button.connect_clicked(move |_| {
+                send_menu_event(destination_clone.clone(), menu_path_clone.clone(), id);
+                popover_clone.popdown();
+            });
         }
 
-        let action_name = action_name_for_id(entry.id);
-        let detailed_action = format!("traymenu.{action_name}");
-        let action = SimpleAction::new(&action_name, None);
-        let destination = destination.to_string();
-        let menu_path = menu_path.to_string();
-        let id = entry.id;
-        action.connect_activate(move |_, _| {
-            send_menu_event(destination.clone(), menu_path.clone(), id);
-        });
-        action.set_enabled(entry.enabled);
-        action_group.add_action(&action);
-        section.append(Some(&entry.label), Some(&detailed_action));
-        section_has_items = true;
-    }
-
-    if section_has_items {
-        menu.append_section(None, &section);
-    }
-}
-
-fn action_name_for_id(id: i32) -> String {
-    if id < 0 {
-        format!("item_n{}", id.unsigned_abs())
-    } else {
-        format!("item_{id}")
+        container.append(&button);
+        previous_was_separator = false;
     }
 }
 

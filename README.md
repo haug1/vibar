@@ -117,7 +117,7 @@ Module schema:
   - `icon_size` defaults to `16` and values below `8` are clamped
   - `poll_interval_secs` defaults to `2` and values below `1` are clamped
   - left click: calls SNI `Activate`
-  - right click: prefers host-rendered DBusMenu via SNI `Menu` + `com.canonical.dbusmenu` (including nested submenus); falls back to SNI click methods
+  - right click: renders DBusMenu via SNI `Menu` + `com.canonical.dbusmenu` in a custom GTK popover (including nested submenus and `icon-name`/`icon-data` menu icons); falls back to SNI click methods
   - middle click: calls SNI `SecondaryActivate`
   - current implementation uses `IconName`/`AttentionIconName` for icons (icon pixmap fallback is not implemented yet)
 
@@ -160,6 +160,8 @@ Suggested selectors:
 - `.clock`
 - `.tray`
 - `.tray-item`
+- `.tray-menu-popover`
+- `.tray-menu-item`
 
 ## Troubleshooting
 

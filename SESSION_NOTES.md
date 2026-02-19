@@ -26,7 +26,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - polls `org.kde.StatusNotifierWatcher` for tray items
   - renders icon-name based tray buttons
   - left click calls item `Activate`
-  - right click prefers host-rendered DBusMenu (`Menu` + `com.canonical.dbusmenu`, including nested submenus) with fallback to item click methods
+  - right click renders DBusMenu (`Menu` + `com.canonical.dbusmenu`) in a custom GTK popover, including nested submenus and `icon-name`/`icon-data` menu icons, with fallback to item click methods
   - middle click calls item `SecondaryActivate`
   - `icon_size` defaults to `16` (min `8`), `poll_interval_secs` defaults to `2` (min `1`)
 - Default CSS comes from repo `style.css` (embedded at build time)
