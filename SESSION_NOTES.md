@@ -52,7 +52,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - `ModuleConfig` is string-keyed (`type` + raw config map) in `src/modules/mod.rs`.
   - Each module file owns typed config parsing + widget init behind `ModuleFactory`.
   - `modules::build_module` resolves factory by module type and initializes dynamically.
-- Tray module: `src/modules/tray.rs`
+- Tray module: `src/modules/tray/` (`mod.rs`, `sni.rs`, `menu_dbus.rs`, `menu_ui.rs`, `types.rs`)
 - Workspace module: `src/modules/sway/workspace.rs`
 - Rust deps: `Cargo.toml`
 - Lockfile: `Cargo.lock`
