@@ -34,6 +34,9 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 ## Key Files
 
 - App entry: `src/main.rs`
+- Config parsing/models: `src/config.rs`
+- Style loading: `src/style.rs`
+- Module builders: `src/modules/`
 - Workspace module: `src/workspaces.rs`
 - Rust deps: `Cargo.toml`
 - Lockfile: `Cargo.lock`

@@ -1,75 +1,16 @@
-use std::fs;
-use std::process::Command;
-
-use chrono::Local;
-use glib::ControlFlow;
-use gtk::gdk;
 use gtk::prelude::*;
-use gtk::{Application, ApplicationWindow, Box as GtkBox, CenterBox, Label, Orientation};
+use gtk::{Application, ApplicationWindow, Box as GtkBox, CenterBox, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
-use serde::Deserialize;
 
+mod config;
+mod modules;
+mod style;
 mod workspaces;
+
+use config::{load_config, Config, ModuleConfig};
 
 const APP_ID: &str = "com.example.mybar";
 const CONFIG_PATH: &str = "./config.jsonc";
-const DEFAULT_CLOCK_FMT: &str = "%a %d. %b %H:%M:%S";
-const MIN_EXEC_INTERVAL_SECS: u32 = 1;
-
-#[derive(Debug, Deserialize, Clone, Default)]
-struct Config {
-    #[serde(default)]
-    areas: Areas,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct Areas {
-    #[serde(default = "default_left")]
-    left: Vec<ModuleConfig>,
-    #[serde(default)]
-    center: Vec<ModuleConfig>,
-    #[serde(default = "default_right")]
-    right: Vec<ModuleConfig>,
-}
-
-impl Default for Areas {
-    fn default() -> Self {
-        Self {
-            left: default_left(),
-            center: Vec::new(),
-            right: default_right(),
-        }
-    }
-}
-
-fn default_left() -> Vec<ModuleConfig> {
-    vec![ModuleConfig::Workspaces]
-}
-
-fn default_right() -> Vec<ModuleConfig> {
-    vec![ModuleConfig::Clock { format: None }]
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-enum ModuleConfig {
-    Exec {
-        command: String,
-        #[serde(default = "default_exec_interval")]
-        interval_secs: u32,
-        #[serde(default)]
-        class: Option<String>,
-    },
-    Workspaces,
-    Clock {
-        #[serde(default)]
-        format: Option<String>,
-    },
-}
-
-fn default_exec_interval() -> u32 {
-    5
-}
 
 fn main() {
     let app = Application::builder().application_id(APP_ID).build();
@@ -77,41 +18,11 @@ fn main() {
     app.connect_activate(|app| {
         let config = load_config(CONFIG_PATH);
         let window = build_window(app, &config);
-        load_default_css();
+        style::load_default_css();
         window.present();
     });
 
     app.run();
-}
-
-fn load_config(path: &str) -> Config {
-    match fs::read_to_string(path) {
-        Ok(content) => match parse_config(&content) {
-            Ok(cfg) => cfg,
-            Err(err) => {
-                eprintln!("Failed to parse {path}: {err}");
-                Config::default()
-            }
-        },
-        Err(_) => Config::default(),
-    }
-}
-
-fn parse_config(content: &str) -> Result<Config, json5::Error> {
-    json5::from_str::<Config>(content)
-}
-
-fn load_default_css() {
-    let provider = gtk::CssProvider::new();
-    provider.load_from_data(include_str!("../style.css"));
-
-    if let Some(display) = gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
 }
 
 fn build_window(app: &Application, config: &Config) -> ApplicationWindow {
@@ -162,7 +73,11 @@ fn build_area(container: &GtkBox, modules: &[ModuleConfig]) {
                 interval_secs,
                 class,
             } => {
-                let widget = build_exec_module(command.clone(), *interval_secs, class.clone());
+                let widget = modules::exec::build_exec_module(
+                    command.clone(),
+                    *interval_secs,
+                    class.clone(),
+                );
                 container.append(&widget);
             }
             ModuleConfig::Workspaces => {
@@ -170,102 +85,11 @@ fn build_area(container: &GtkBox, modules: &[ModuleConfig]) {
                 container.append(&widget);
             }
             ModuleConfig::Clock { format } => {
-                let widget = build_clock_module(format.clone());
+                let widget = modules::clock::build_clock_module(format.clone());
                 container.append(&widget);
             }
         }
     }
-}
-
-fn build_exec_module(command: String, interval_secs: u32, class: Option<String>) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("exec");
-    let effective_interval_secs = normalized_exec_interval(interval_secs);
-
-    if effective_interval_secs != interval_secs {
-        eprintln!(
-            "exec interval_secs={} is too low; clamping to {} second",
-            interval_secs, effective_interval_secs
-        );
-    }
-
-    if let Some(class_name) = class {
-        label.add_css_class(&class_name);
-    }
-
-    let (sender, receiver) = std::sync::mpsc::channel::<String>();
-
-    glib::timeout_add_local(std::time::Duration::from_millis(200), {
-        let label = label.clone();
-        move || {
-            while let Ok(text) = receiver.try_recv() {
-                label.set_text(&text);
-            }
-            ControlFlow::Continue
-        }
-    });
-
-    trigger_exec_command(command.clone(), sender.clone());
-
-    glib::timeout_add_seconds_local(effective_interval_secs, move || {
-        trigger_exec_command(command.clone(), sender.clone());
-        ControlFlow::Continue
-    });
-
-    label
-}
-
-fn normalized_exec_interval(interval_secs: u32) -> u32 {
-    interval_secs.max(MIN_EXEC_INTERVAL_SECS)
-}
-
-fn trigger_exec_command(command: String, sender: std::sync::mpsc::Sender<String>) {
-    std::thread::spawn(move || {
-        let text = match Command::new("sh").arg("-c").arg(&command).output() {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-
-                if !stdout.is_empty() {
-                    stdout
-                } else if !stderr.is_empty() {
-                    stderr
-                } else {
-                    String::new()
-                }
-            }
-            Err(err) => format!("exec error: {err}"),
-        };
-
-        let _ = sender.send(text);
-    });
-}
-
-fn build_clock_module(format: Option<String>) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("clock");
-
-    let fmt = format.unwrap_or_else(|| DEFAULT_CLOCK_FMT.to_string());
-
-    let update = {
-        let label = label.clone();
-        let fmt = fmt.clone();
-        move || {
-            let now = Local::now();
-            label.set_text(&now.format(&fmt).to_string());
-        }
-    };
-
-    update();
-
-    glib::timeout_add_seconds_local(1, move || {
-        update();
-        ControlFlow::Continue
-    });
-
-    label
 }
 
 #[cfg(test)]
@@ -274,7 +98,7 @@ mod tests {
 
     #[test]
     fn parse_config_defaults_to_builtin_areas() {
-        let cfg = parse_config("{}").expect("config should parse");
+        let cfg = config::parse_config("{}").expect("config should parse");
         assert_eq!(cfg.areas.left.len(), 1);
         assert_eq!(cfg.areas.center.len(), 0);
         assert_eq!(cfg.areas.right.len(), 1);
@@ -282,8 +106,9 @@ mod tests {
 
     #[test]
     fn parse_exec_module_uses_default_interval() {
-        let cfg = parse_config(r#"{ areas: { left: [{ type: "exec", command: "echo ok" }] } }"#)
-            .expect("config should parse");
+        let cfg =
+            config::parse_config(r#"{ areas: { left: [{ type: "exec", command: "echo ok" }] } }"#)
+                .expect("config should parse");
 
         match &cfg.areas.left[0] {
             ModuleConfig::Exec { interval_secs, .. } => assert_eq!(*interval_secs, 5),
@@ -293,8 +118,8 @@ mod tests {
 
     #[test]
     fn normalized_exec_interval_enforces_lower_bound() {
-        assert_eq!(normalized_exec_interval(0), 1);
-        assert_eq!(normalized_exec_interval(1), 1);
-        assert_eq!(normalized_exec_interval(10), 10);
+        assert_eq!(modules::exec::normalized_exec_interval(0), 1);
+        assert_eq!(modules::exec::normalized_exec_interval(1), 1);
+        assert_eq!(modules::exec::normalized_exec_interval(10), 10);
     }
 }
