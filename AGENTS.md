@@ -12,35 +12,23 @@ Instructions for coding agents working in this repository.
 
 Run commands from repo root:
 
-- Install deps/toolchain: `make deps`
 - Generate/update lockfile: `make lock`
-- Build: `make build`
-- Run: `make run`
-- Full local CI checks: `make ci`
+- Always make sure this command passes changes: `make ci`
 
 If dependencies change in `Cargo.toml`, update and commit `Cargo.lock`.
 
 ## Technical Guardrails
 
 - Prefer lockfile-based commands (`--locked`) where defined.
-- Do not bypass `scripts/build.sh` checks for normal builds.
-- Keep module/config changes backwards compatible when possible.
 - Avoid large refactors unless explicitly requested.
 
 ## Files That Must Stay In Sync
 
-When behavior, commands, or architecture changes, update:
+When behavior, commands, or architecture consider(but also don't feel obliged to make) changes, update:
 
 - `README.md` for user-facing usage/docs
 - `SESSION_NOTES.md` for concise future-session orientation
 - `config.jsonc` example if config schema/defaults changed
-
-## Style and Change Hygiene
-
-- Keep patches focused and minimal.
-- Preserve existing naming/style unless there is a strong reason.
-- Add comments only where logic is non-obvious.
-- Never commit transient/local files (for example `.session`, `target/`).
 
 ## Safety
 
