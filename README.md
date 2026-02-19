@@ -2,6 +2,9 @@
 
 A minimal Wayland taskbar scaffold using Rust + GTK4 + `gtk4-layer-shell`.
 
+Quick orientation for future sessions: see `SESSION_NOTES.md`.
+Agent collaboration contract: see `AGENTS.md`.
+
 ## Standardized Project Workflow
 
 This repository now follows a predictable Rust app workflow:
