@@ -1,3 +1,4 @@
+use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Box as GtkBox, CenterBox, Orientation};
 use gtk4_layer_shell::{Edge, Layer, LayerShell};
@@ -17,15 +18,41 @@ fn main() {
 
     app.connect_activate(|app| {
         let config = load_config(CONFIG_PATH);
-        let window = build_window(app, &config);
         style::load_default_css();
-        window.present();
+
+        let monitors = connected_monitors();
+        if monitors.is_empty() {
+            let window = build_window(app, &config, None);
+            window.present();
+            return;
+        }
+
+        for monitor in monitors {
+            let window = build_window(app, &config, Some(&monitor));
+            window.present();
+        }
     });
 
     app.run();
 }
 
-fn build_window(app: &Application, config: &Config) -> ApplicationWindow {
+fn connected_monitors() -> Vec<gdk::Monitor> {
+    let Some(display) = gdk::Display::default() else {
+        return Vec::new();
+    };
+    let monitors = display.monitors();
+
+    (0..monitors.n_items())
+        .filter_map(|idx| monitors.item(idx))
+        .filter_map(|obj| obj.downcast::<gdk::Monitor>().ok())
+        .collect()
+}
+
+fn build_window(
+    app: &Application,
+    config: &Config,
+    monitor: Option<&gdk::Monitor>,
+) -> ApplicationWindow {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("mybar")
@@ -38,6 +65,9 @@ fn build_window(app: &Application, config: &Config) -> ApplicationWindow {
     window.set_anchor(Edge::Right, true);
     window.set_anchor(Edge::Bottom, true);
     window.auto_exclusive_zone_enable();
+    if let Some(monitor) = monitor {
+        window.set_monitor(Some(monitor));
+    }
 
     let root = CenterBox::builder()
         .orientation(Orientation::Horizontal)

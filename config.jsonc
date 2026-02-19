@@ -1,15 +1,11 @@
 {
   // Optional. Remove this file to use built-in defaults.
-  areas: {
-    left: [
-      { type: "workspaces" }
-    ],
-    center: [
+  "areas": {
+    "left": [{ "type": "workspaces" }],
+    "center": [
       // interval_secs defaults to 5 and minimum is 1
-      // { type: "exec", command: "echo hello", interval_secs: 2 }
+      { "type": "exec", "command": "echo $RANDOM", "interval_secs": 5 },
     ],
-    right: [
-      { type: "clock", format: "%a %d. %b %H:%M:%S" }
-    ]
-  }
+    "right": [{ "type": "clock", "format": "%a %d. %b %H:%M:%S" }],
+  },
 }

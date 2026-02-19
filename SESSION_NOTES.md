@@ -12,6 +12,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 ## Core Behavior (MVP)
 
 - Bottom-anchored layer-shell bar
+- One bar window per connected monitor at startup
 - 3 layout areas: `left`, `center`, `right`
 - Default modules:
   - `left`: sway workspaces

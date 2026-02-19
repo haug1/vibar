@@ -70,6 +70,7 @@ make ci
 ## Features
 
 - Bottom-anchored layer-shell bar
+- One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Module types:
   - `workspaces` (default in `left`, via sway IPC; updates immediately on workspace/output events)
@@ -156,6 +157,6 @@ Suggested selectors:
 
 ## Next Steps
 
-- Multi-monitor output handling
+- Dynamic monitor hotplug handling (add/remove bars at runtime)
 - More module types and robust module lifecycle
 - Better config discovery/reload
