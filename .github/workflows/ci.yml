@@ -14,11 +14,13 @@ jobs:
 
       - name: Install system dependencies
         run: |
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y universe
           sudo apt-get update
           sudo apt-get install -y \
             pkg-config \
             libgtk-4-dev \
-            libgtk-layer-shell-dev \
+            libgtk4-layer-shell-dev \
             libwayland-dev \
             wayland-protocols
 
