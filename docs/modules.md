@@ -252,9 +252,9 @@ Format placeholders:
 
 Behavior:
 
-- Uses `pactl subscribe` callbacks for near-immediate updates.
-- On each relevant audio event, reads default sink volume/mute and default source mute state.
-- Detects Bluetooth/default sink characteristics from `pactl list sinks`.
+- Uses native `libpulse` subscription callbacks for near-immediate updates.
+- On each relevant audio event, reads default sink volume/mute and default source mute state via PulseAudio introspection.
+- Detects Bluetooth/default sink characteristics from sink metadata/properties.
 - Scroll up/down adjusts default sink volume by `scroll-step`.
 
 Styling:

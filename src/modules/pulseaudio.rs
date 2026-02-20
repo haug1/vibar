@@ -1,11 +1,21 @@
-use std::io::{BufRead, BufReader};
 use std::process::Command;
-use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use glib::{ControlFlow, Propagation};
+use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{EventControllerScroll, EventControllerScrollFlags, GestureClick, Label, Widget};
+use libpulse_binding as pulse;
+use pulse::callbacks::ListResult;
+use pulse::context::introspect::{ServerInfo, SinkInfo};
+use pulse::context::subscribe::{Facility, InterestMaskSet};
+use pulse::context::{Context, FlagSet as ContextFlagSet, State as ContextState};
+use pulse::mainloop::standard::{IterateResult, Mainloop};
+use pulse::operation::State as OperationState;
+use pulse::proplist::{properties, Proplist};
+use pulse::volume::Volume;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -13,8 +23,9 @@ use crate::modules::{ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
-const UI_DRAIN_INTERVAL_MILLIS: u64 = 200;
-const SUBSCRIBE_RECONNECT_DELAY_SECS: u64 = 2;
+const MAINLOOP_IDLE_SLEEP_MILLIS: u64 = 10;
+const UI_DRAIN_INTERVAL_MILLIS: u64 = 16;
+const SESSION_RECONNECT_DELAY_SECS: u64 = 2;
 const DEFAULT_SCROLL_STEP: f64 = 1.0;
 const DEFAULT_FORMAT: &str = "{volume}% {icon}  {format_source}";
 const DEFAULT_FORMAT_BLUETOOTH: &str = "{volume}% {icon} {format_source}";
@@ -86,6 +97,12 @@ struct PulseState {
     icon_kind: IconKind,
 }
 
+#[derive(Debug, Clone)]
+struct ServerDefaults {
+    sink_name: String,
+    source_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IconKind {
     Headphone,
@@ -95,6 +112,11 @@ enum IconKind {
     Portable,
     Car,
     Default,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum WorkerCommand {
+    VolumeStep { increase: bool, step: f64 },
 }
 
 pub(crate) struct PulseAudioFactory;
@@ -166,6 +188,8 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
         label.add_controller(click);
     }
 
+    let (worker_tx, worker_rx) = mpsc::channel::<WorkerCommand>();
+
     let scroll_step = normalized_scroll_step(config.scroll_step);
     if (scroll_step - config.scroll_step).abs() > f64::EPSILON {
         eprintln!(
@@ -177,28 +201,35 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
         let scroll = EventControllerScroll::new(
             EventControllerScrollFlags::VERTICAL | EventControllerScrollFlags::DISCRETE,
         );
+        let worker_tx = worker_tx.clone();
         scroll.connect_scroll(move |_, _, dy| {
             if dy < 0.0 {
-                run_volume_step(scroll_step, true);
-                return Propagation::Stop;
+                let _ = worker_tx.send(WorkerCommand::VolumeStep {
+                    increase: true,
+                    step: scroll_step,
+                });
+                return glib::Propagation::Stop;
             }
             if dy > 0.0 {
-                run_volume_step(scroll_step, false);
-                return Propagation::Stop;
+                let _ = worker_tx.send(WorkerCommand::VolumeStep {
+                    increase: false,
+                    step: scroll_step,
+                });
+                return glib::Propagation::Stop;
             }
-            Propagation::Proceed
+            glib::Propagation::Proceed
         });
         label.add_controller(scroll);
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<String>();
+    let (ui_sender, ui_receiver) = mpsc::channel::<String>();
     let render_config = config.clone();
-    std::thread::spawn(move || run_subscribe_loop(sender, render_config));
+    std::thread::spawn(move || run_native_loop(ui_sender, worker_rx, render_config));
 
     glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
         let label = label.clone();
         move || {
-            while let Ok(text) = receiver.try_recv() {
+            while let Ok(text) = ui_receiver.try_recv() {
                 label.set_text(&text);
             }
             ControlFlow::Continue
@@ -223,240 +254,430 @@ fn run_click_command(command: &str) {
     });
 }
 
-fn run_volume_step(step: f64, increase: bool) {
-    let delta = format!(
-        "{}{}%",
-        if increase { "+" } else { "-" },
-        format_step_value(step)
-    );
-    std::thread::spawn(move || {
-        let _ = Command::new("pactl")
-            .args(["set-sink-volume", "@DEFAULT_SINK@", &delta])
-            .status();
-    });
-}
-
-fn format_step_value(step: f64) -> String {
-    let rendered = format!("{step:.3}");
-    rendered
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_string()
-}
-
-fn run_subscribe_loop(sender: std::sync::mpsc::Sender<String>, config: PulseAudioConfig) {
+fn run_native_loop(
+    ui_sender: mpsc::Sender<String>,
+    worker_rx: Receiver<WorkerCommand>,
+    config: PulseAudioConfig,
+) {
     loop {
-        send_rendered_state(&sender, &config);
-        if let Err(err) = subscribe_for_updates(&sender, &config) {
-            let _ = sender.send(format!("audio error: {err}"));
-            std::thread::sleep(Duration::from_secs(SUBSCRIBE_RECONNECT_DELAY_SECS));
+        match run_native_session(&ui_sender, &worker_rx, &config) {
+            Ok(()) => return,
+            Err(err) => {
+                let _ = ui_sender.send(format!("audio error: {err}"));
+                std::thread::sleep(Duration::from_secs(SESSION_RECONNECT_DELAY_SECS));
+            }
         }
     }
 }
 
-fn send_rendered_state(sender: &std::sync::mpsc::Sender<String>, config: &PulseAudioConfig) {
-    let text = match read_pulseaudio_state() {
-        Ok(state) => render_format(config, &state),
-        Err(err) => format!("audio error: {err}"),
-    };
-    let _ = sender.send(text);
-}
-
-fn subscribe_for_updates(
-    sender: &std::sync::mpsc::Sender<String>,
+fn run_native_session(
+    ui_sender: &mpsc::Sender<String>,
+    worker_rx: &Receiver<WorkerCommand>,
     config: &PulseAudioConfig,
 ) -> Result<(), String> {
-    let mut child = Command::new("pactl")
-        .arg("subscribe")
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(|err| format!("failed to run pactl subscribe: {err}"))?;
+    let mut proplist =
+        Proplist::new().ok_or_else(|| "failed to create pulseaudio proplist".to_string())?;
+    proplist
+        .set_str(properties::APPLICATION_NAME, "mybar")
+        .map_err(|err| format!("failed to set pulseaudio app name: {err:?}"))?;
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "pactl subscribe did not provide stdout".to_string())?;
-    let reader = BufReader::new(stdout);
+    let mut mainloop =
+        Mainloop::new().ok_or_else(|| "failed to create pulseaudio mainloop".to_string())?;
+    let mut context = Context::new_with_proplist(&mainloop, "mybar-pulseaudio", &proplist)
+        .ok_or_else(|| "failed to create pulseaudio context".to_string())?;
 
-    for line in reader.lines() {
-        let line = line.map_err(|err| format!("failed reading pactl subscribe output: {err}"))?;
-        if is_subscription_event_relevant(&line) {
-            send_rendered_state(sender, config);
-        }
-    }
+    context
+        .connect(None, ContextFlagSet::NOFLAGS, None)
+        .map_err(|err| format!("failed to connect pulseaudio context: {err:?}"))?;
 
-    let status = child
-        .wait()
-        .map_err(|err| format!("failed waiting on pactl subscribe: {err}"))?;
-    if !status.success() {
-        return Err(format!("pactl subscribe exited with status {status}"));
-    }
+    wait_for_context_ready(&mut mainloop, &context)?;
 
-    Err("pactl subscribe stream ended".to_string())
-}
-
-fn is_subscription_event_relevant(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    lower.contains(" on sink ")
-        || lower.contains(" on source ")
-        || lower.contains(" on server ")
-        || lower.contains(" on card ")
-}
-
-fn read_pulseaudio_state() -> Result<PulseState, String> {
-    let volume_output = run_pactl(&["get-sink-volume", "@DEFAULT_SINK@"])?;
-    let mute_output = run_pactl(&["get-sink-mute", "@DEFAULT_SINK@"])?;
-    let source_mute_output = run_pactl(&["get-source-mute", "@DEFAULT_SOURCE@"])?;
-    let sink_name = read_default_sink_name()?;
-    let sinks_output = run_pactl(&["list", "sinks"])?;
-    let sink_meta = parse_sink_metadata(&sinks_output, &sink_name);
-
-    Ok(PulseState {
-        volume: parse_volume_percent(&volume_output)?,
-        muted: parse_mute_state(&mute_output)?,
-        source_muted: parse_mute_state(&source_mute_output)?,
-        bluetooth: sink_meta.bluetooth,
-        icon_kind: sink_meta.icon_kind,
-    })
-}
-
-fn run_pactl(args: &[&str]) -> Result<String, String> {
-    let output = Command::new("pactl")
-        .args(args)
-        .output()
-        .map_err(|err| format!("failed to run pactl {}: {err}", args.join(" ")))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!(
-                "pactl {} exited with status {}",
-                args.join(" "),
-                output.status
-            )
-        } else {
-            format!("pactl {} failed: {stderr}", args.join(" "))
-        });
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn read_default_sink_name() -> Result<String, String> {
-    let info = run_pactl(&["info"])?;
-    parse_default_sink_name(&info)
-}
-
-fn parse_default_sink_name(info_output: &str) -> Result<String, String> {
-    let sink_name = info_output
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("Default Sink:"))
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_string);
-    sink_name.ok_or_else(|| "could not parse default sink name from pactl info".to_string())
-}
-
-fn parse_volume_percent(volume_output: &str) -> Result<u32, String> {
-    for token in volume_output.split_whitespace() {
-        if let Some(raw) = token.strip_suffix('%') {
-            let cleaned = raw.trim_matches(|c: char| !c.is_ascii_digit());
-            if cleaned.is_empty() {
-                continue;
+    let dirty = Arc::new(AtomicBool::new(true));
+    context.set_subscribe_callback(Some(Box::new({
+        let dirty = Arc::clone(&dirty);
+        move |facility, operation, _| {
+            if is_relevant_pulse_event(facility, operation) {
+                dirty.store(true, Ordering::SeqCst);
             }
-            let value = cleaned
-                .parse::<u32>()
-                .map_err(|err| format!("failed parsing volume '{cleaned}': {err}"))?;
-            return Ok(value);
+        }
+    })));
+
+    let mut subscribe_op = context.subscribe(
+        InterestMaskSet::SINK
+            | InterestMaskSet::SOURCE
+            | InterestMaskSet::SERVER
+            | InterestMaskSet::CARD,
+        |_| {},
+    );
+    wait_for_operation(&mut mainloop, &mut subscribe_op)?;
+
+    let mut last_defaults: Option<ServerDefaults> = None;
+
+    loop {
+        loop {
+            match worker_rx.try_recv() {
+                Ok(WorkerCommand::VolumeStep { increase, step }) => {
+                    if let Some(defaults) = last_defaults.as_ref() {
+                        let _ = apply_volume_step(
+                            &context,
+                            &mut mainloop,
+                            &defaults.sink_name,
+                            step,
+                            increase,
+                        );
+                    }
+                    dirty.store(true, Ordering::SeqCst);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => return Ok(()),
+            }
+        }
+
+        if dirty.swap(false, Ordering::SeqCst) {
+            match query_current_state(&context, &mut mainloop) {
+                Ok((state, defaults)) => {
+                    last_defaults = Some(defaults);
+                    let _ = ui_sender.send(render_format(config, &state));
+                }
+                Err(err) => {
+                    let _ = ui_sender.send(format!("audio error: {err}"));
+                }
+            }
+        }
+
+        match mainloop.iterate(false) {
+            IterateResult::Success(_) => {}
+            IterateResult::Quit(_) => return Err("pulseaudio mainloop quit".to_string()),
+            IterateResult::Err(err) => {
+                return Err(format!("pulseaudio mainloop iteration failed: {err:?}"));
+            }
+        }
+
+        match context.get_state() {
+            ContextState::Ready => {}
+            ContextState::Failed => {
+                return Err(format!("pulseaudio context failed: {:?}", context.errno()));
+            }
+            ContextState::Terminated => {
+                return Err("pulseaudio context terminated".to_string());
+            }
+            _ => {}
+        }
+
+        std::thread::sleep(Duration::from_millis(MAINLOOP_IDLE_SLEEP_MILLIS));
+    }
+}
+
+fn wait_for_context_ready(mainloop: &mut Mainloop, context: &Context) -> Result<(), String> {
+    loop {
+        match context.get_state() {
+            ContextState::Ready => return Ok(()),
+            ContextState::Failed => {
+                return Err(format!(
+                    "pulseaudio context failed while connecting: {:?}",
+                    context.errno()
+                ));
+            }
+            ContextState::Terminated => {
+                return Err("pulseaudio context terminated while connecting".to_string());
+            }
+            _ => iterate_mainloop_blocking(mainloop)?,
         }
     }
-    Err("could not parse sink volume percentage".to_string())
 }
 
-fn parse_mute_state(mute_output: &str) -> Result<bool, String> {
-    let value = mute_output
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("Mute:"))
-        .map(str::trim)
-        .ok_or_else(|| "could not parse mute state".to_string())?;
-
-    match value {
-        "yes" => Ok(true),
-        "no" => Ok(false),
-        other => Err(format!("unexpected mute state '{other}'")),
+fn wait_for_operation<ClosureProto: ?Sized>(
+    mainloop: &mut Mainloop,
+    operation: &mut pulse::operation::Operation<ClosureProto>,
+) -> Result<(), String> {
+    loop {
+        match operation.get_state() {
+            OperationState::Running => iterate_mainloop_blocking(mainloop)?,
+            OperationState::Done => return Ok(()),
+            OperationState::Cancelled => {
+                return Err("pulseaudio operation was cancelled".to_string());
+            }
+        }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct SinkMetadata {
+fn iterate_mainloop_blocking(mainloop: &mut Mainloop) -> Result<(), String> {
+    match mainloop.iterate(true) {
+        IterateResult::Success(_) => Ok(()),
+        IterateResult::Quit(_) => Err("pulseaudio mainloop quit".to_string()),
+        IterateResult::Err(err) => Err(format!("pulseaudio mainloop iteration failed: {err:?}")),
+    }
+}
+
+fn is_relevant_pulse_event(
+    facility: Option<Facility>,
+    operation: Option<pulse::context::subscribe::Operation>,
+) -> bool {
+    let Some(facility) = facility else {
+        return false;
+    };
+
+    let relevant_facility = matches!(
+        facility,
+        Facility::Sink | Facility::Source | Facility::Server | Facility::Card
+    );
+    let relevant_operation = operation.is_some();
+    relevant_facility && relevant_operation
+}
+
+fn query_current_state(
+    context: &Context,
+    mainloop: &mut Mainloop,
+) -> Result<(PulseState, ServerDefaults), String> {
+    let defaults = query_server_defaults(context, mainloop)?;
+    let sink_info = query_sink_info(context, mainloop, &defaults.sink_name)?;
+
+    let source_muted = match defaults.source_name.as_ref() {
+        Some(source_name) => query_source_muted(context, mainloop, source_name)?,
+        None => false,
+    };
+
+    Ok((
+        PulseState {
+            volume: sink_info.volume,
+            muted: sink_info.muted,
+            source_muted,
+            bluetooth: sink_info.bluetooth,
+            icon_kind: sink_info.icon_kind,
+        },
+        defaults,
+    ))
+}
+
+fn query_server_defaults(
+    context: &Context,
+    mainloop: &mut Mainloop,
+) -> Result<ServerDefaults, String> {
+    let slot = Arc::new(Mutex::new(None::<ServerDefaults>));
+    let mut op = context.introspect().get_server_info({
+        let slot = Arc::clone(&slot);
+        move |info: &ServerInfo| {
+            let sink_name = info.default_sink_name.as_ref().map(|name| name.to_string());
+            let source_name = info
+                .default_source_name
+                .as_ref()
+                .map(|name| name.to_string());
+
+            if let Some(sink_name) = sink_name {
+                *slot.lock().expect("server defaults mutex poisoned") = Some(ServerDefaults {
+                    sink_name,
+                    source_name,
+                });
+            }
+        }
+    });
+    wait_for_operation(mainloop, &mut op)?;
+
+    let result = slot
+        .lock()
+        .expect("server defaults mutex poisoned")
+        .clone()
+        .ok_or_else(|| "pulseaudio default sink is unavailable".to_string());
+    result
+}
+
+#[derive(Debug, Clone)]
+struct SinkSnapshot {
+    volume: u32,
+    muted: bool,
     bluetooth: bool,
     icon_kind: IconKind,
 }
 
-fn parse_sink_metadata(sinks_output: &str, default_sink_name: &str) -> SinkMetadata {
-    let mut current_name: Option<String> = None;
-    let mut current_description: Option<String> = None;
-    let mut current_active_port: Option<String> = None;
-    let mut best: Option<SinkMetadata> = None;
-
-    let mut finalize =
-        |name: Option<String>, description: Option<String>, active_port: Option<String>| {
-            let Some(name) = name else {
-                return;
-            };
-            if name != default_sink_name {
-                return;
+fn query_sink_info(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    sink_name: &str,
+) -> Result<SinkSnapshot, String> {
+    let slot = Arc::new(Mutex::new(None::<Result<SinkSnapshot, String>>));
+    let mut op = context.introspect().get_sink_info_by_name(sink_name, {
+        let slot = Arc::clone(&slot);
+        move |result| {
+            let mut guard = slot.lock().expect("sink info mutex poisoned");
+            match result {
+                ListResult::Item(info) => {
+                    *guard = Some(Ok(snapshot_from_sink_info(info)));
+                }
+                ListResult::End => {
+                    if guard.is_none() {
+                        *guard = Some(Err("pulseaudio sink info not found".to_string()));
+                    }
+                }
+                ListResult::Error => {
+                    *guard = Some(Err("pulseaudio sink info query failed".to_string()));
+                }
             }
-            let lower = format!(
-                "{} {} {}",
-                name.to_lowercase(),
-                description.unwrap_or_default().to_lowercase(),
-                active_port.unwrap_or_default().to_lowercase()
-            );
-            let bluetooth = lower.contains("bluez") || lower.contains("bluetooth");
-            let icon_kind = classify_icon_kind(&lower);
-            best = Some(SinkMetadata {
-                bluetooth,
-                icon_kind,
-            });
-        };
+        }
+    });
+    wait_for_operation(mainloop, &mut op)?;
 
-    for line in sinks_output.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("Sink #") {
-            finalize(
-                current_name.take(),
-                current_description.take(),
-                current_active_port.take(),
-            );
-            current_name = None;
-            current_description = None;
-            current_active_port = None;
-            continue;
-        }
+    let result = slot
+        .lock()
+        .expect("sink info mutex poisoned")
+        .clone()
+        .unwrap_or_else(|| Err("pulseaudio sink info query returned no data".to_string()));
+    result
+}
 
-        if let Some(name) = trimmed.strip_prefix("Name:") {
-            current_name = Some(name.trim().to_string());
-            continue;
+fn query_source_muted(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    source_name: &str,
+) -> Result<bool, String> {
+    let slot = Arc::new(Mutex::new(None::<Result<bool, String>>));
+    let mut op = context.introspect().get_source_info_by_name(source_name, {
+        let slot = Arc::clone(&slot);
+        move |result| {
+            let mut guard = slot.lock().expect("source info mutex poisoned");
+            match result {
+                ListResult::Item(info) => {
+                    *guard = Some(Ok(info.mute));
+                }
+                ListResult::End => {
+                    if guard.is_none() {
+                        *guard = Some(Err("pulseaudio source info not found".to_string()));
+                    }
+                }
+                ListResult::Error => {
+                    *guard = Some(Err("pulseaudio source info query failed".to_string()));
+                }
+            }
         }
-        if let Some(description) = trimmed.strip_prefix("Description:") {
-            current_description = Some(description.trim().to_string());
-            continue;
+    });
+    wait_for_operation(mainloop, &mut op)?;
+
+    let result = slot
+        .lock()
+        .expect("source info mutex poisoned")
+        .clone()
+        .unwrap_or_else(|| Err("pulseaudio source info query returned no data".to_string()));
+    result
+}
+
+fn snapshot_from_sink_info(info: &SinkInfo) -> SinkSnapshot {
+    let volume = volume_to_percent(info.volume.avg());
+    let mut content = String::new();
+
+    if let Some(name) = info.name.as_ref() {
+        content.push_str(name);
+        content.push(' ');
+    }
+    if let Some(description) = info.description.as_ref() {
+        content.push_str(description);
+        content.push(' ');
+    }
+    if let Some(port) = info.active_port.as_ref() {
+        if let Some(name) = port.name.as_ref() {
+            content.push_str(name);
+            content.push(' ');
         }
-        if let Some(active_port) = trimmed.strip_prefix("Active Port:") {
-            current_active_port = Some(active_port.trim().to_string());
+        if let Some(description) = port.description.as_ref() {
+            content.push_str(description);
+            content.push(' ');
         }
     }
 
-    finalize(current_name, current_description, current_active_port);
+    if let Some(form_factor) = info.proplist.get_str(properties::DEVICE_FORM_FACTOR) {
+        content.push_str(&form_factor);
+        content.push(' ');
+    }
+    if let Some(icon_name) = info.proplist.get_str(properties::DEVICE_ICON_NAME) {
+        content.push_str(&icon_name);
+        content.push(' ');
+    }
+    if let Some(device_description) = info.proplist.get_str(properties::DEVICE_DESCRIPTION) {
+        content.push_str(&device_description);
+    }
 
-    best.unwrap_or_else(|| {
-        let lower = default_sink_name.to_lowercase();
-        SinkMetadata {
-            bluetooth: lower.contains("bluez") || lower.contains("bluetooth"),
-            icon_kind: classify_icon_kind(&lower),
+    let lower = content.to_ascii_lowercase();
+
+    SinkSnapshot {
+        volume,
+        muted: info.mute,
+        bluetooth: lower.contains("bluez") || lower.contains("bluetooth"),
+        icon_kind: classify_icon_kind(&lower),
+    }
+}
+
+fn volume_to_percent(volume: Volume) -> u32 {
+    ((volume.0 as f64 / Volume::NORMAL.0 as f64) * 100.0).round() as u32
+}
+
+fn apply_volume_step(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    sink_name: &str,
+    step: f64,
+    increase: bool,
+) -> Result<(), String> {
+    let sink_info = query_sink_info(context, mainloop, sink_name)?;
+    let mut current = query_sink_channel_volumes(context, mainloop, sink_name)?;
+
+    let delta = percent_to_volume_delta(step);
+    if increase {
+        let _ = current.increase(delta);
+    } else {
+        let _ = current.decrease(delta);
+    }
+
+    let mut introspector = context.introspect();
+    let mut op = introspector.set_sink_volume_by_name(sink_name, &current, None);
+    wait_for_operation(mainloop, &mut op)?;
+
+    if sink_info.muted {
+        let mut mute_op = introspector.set_sink_mute_by_name(sink_name, false, None);
+        wait_for_operation(mainloop, &mut mute_op)?;
+    }
+
+    Ok(())
+}
+
+fn query_sink_channel_volumes(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    sink_name: &str,
+) -> Result<pulse::volume::ChannelVolumes, String> {
+    let slot = Arc::new(Mutex::new(
+        None::<Result<pulse::volume::ChannelVolumes, String>>,
+    ));
+    let mut op = context.introspect().get_sink_info_by_name(sink_name, {
+        let slot = Arc::clone(&slot);
+        move |result| {
+            let mut guard = slot.lock().expect("sink volume mutex poisoned");
+            match result {
+                ListResult::Item(info) => {
+                    *guard = Some(Ok(info.volume));
+                }
+                ListResult::End => {
+                    if guard.is_none() {
+                        *guard = Some(Err("pulseaudio sink volume not found".to_string()));
+                    }
+                }
+                ListResult::Error => {
+                    *guard = Some(Err("pulseaudio sink volume query failed".to_string()));
+                }
+            }
         }
-    })
+    });
+    wait_for_operation(mainloop, &mut op)?;
+
+    let result = slot
+        .lock()
+        .expect("sink volume mutex poisoned")
+        .clone()
+        .unwrap_or_else(|| Err("pulseaudio sink volume query returned no data".to_string()));
+    result
+}
+
+fn percent_to_volume_delta(step: f64) -> Volume {
+    let step = normalized_scroll_step(step).clamp(0.1, 100.0);
+    let value = ((step / 100.0) * f64::from(Volume::NORMAL.0)).round() as u32;
+    Volume(value.max(1))
 }
 
 fn classify_icon_kind(content: &str) -> IconKind {
@@ -580,47 +801,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_default_sink_name_extracts_name() {
-        let info =
-            "Server Name: PulseAudio\nDefault Sink: alsa_output.pci-0000_00_1f.3.analog-stereo\n";
-        let name = parse_default_sink_name(info).expect("default sink should parse");
-        assert_eq!(name, "alsa_output.pci-0000_00_1f.3.analog-stereo");
-    }
-
-    #[test]
-    fn parse_volume_percent_extracts_first_percentage() {
-        let output =
-            "Volume: front-left: 49152 / 75% / -7.50 dB,   front-right: 49152 / 75% / -7.50 dB";
-        assert_eq!(
-            parse_volume_percent(output).expect("volume should parse"),
-            75
-        );
-    }
-
-    #[test]
-    fn parse_mute_state_parses_yes_no() {
-        assert!(parse_mute_state("Mute: yes").expect("yes should parse"));
-        assert!(!parse_mute_state("Mute: no").expect("no should parse"));
-    }
-
-    #[test]
-    fn parse_sink_metadata_matches_default_sink() {
-        let sinks = r#"
-Sink #1
-    Name: alsa_output.pci-0000_00_1f.3.analog-stereo
-    Description: Built-in Audio Analog Stereo
-    Active Port: analog-output-speaker
-Sink #2
-    Name: bluez_output.00_11_22_33_44_55.1
-    Description: Headset
-    Active Port: headset-output
-"#;
-        let meta = parse_sink_metadata(sinks, "bluez_output.00_11_22_33_44_55.1");
-        assert!(meta.bluetooth);
-        assert_eq!(meta.icon_kind, IconKind::Headset);
-    }
-
-    #[test]
     fn render_format_applies_muted_and_source_placeholders() {
         let module = ModuleConfig::new(
             MODULE_TYPE,
@@ -660,11 +840,28 @@ Sink #2
 
     #[test]
     fn subscription_event_filter_matches_audio_updates() {
-        assert!(is_subscription_event_relevant("Event 'change' on sink #1"));
-        assert!(is_subscription_event_relevant("Event 'new' on source #2"));
-        assert!(is_subscription_event_relevant(
-            "Event 'remove' on server #0"
+        assert!(is_relevant_pulse_event(
+            Some(Facility::Sink),
+            Some(pulse::context::subscribe::Operation::Changed)
         ));
-        assert!(!is_subscription_event_relevant("Event 'new' on client #12"));
+        assert!(is_relevant_pulse_event(
+            Some(Facility::Source),
+            Some(pulse::context::subscribe::Operation::New)
+        ));
+        assert!(is_relevant_pulse_event(
+            Some(Facility::Server),
+            Some(pulse::context::subscribe::Operation::Removed)
+        ));
+        assert!(!is_relevant_pulse_event(
+            Some(Facility::Client),
+            Some(pulse::context::subscribe::Operation::New)
+        ));
+        assert!(!is_relevant_pulse_event(Some(Facility::Sink), None));
+    }
+
+    #[test]
+    fn percent_to_volume_delta_converts_step() {
+        let delta = percent_to_volume_delta(1.0);
+        assert!(delta.0 > 0);
     }
 }
