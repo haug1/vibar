@@ -30,6 +30,7 @@ install_debian() {
     build-essential \
     pkg-config \
     libgtk-4-dev \
+    libgtk4-layer-shell-dev \
     libwayland-dev \
     wayland-protocols \
     curl
