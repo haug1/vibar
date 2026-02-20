@@ -6,7 +6,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 
 - Name: `mybar`
 - Goal: minimal Wayland taskbar app (Rust + GTK4 + `gtk4-layer-shell`)
-- Current status: scaffold passes CI (`make ci`)
+- Current status: project passes CI (`make ci`)
 - Primary runtime target: sway/Wayland
 
 ## Core Behavior

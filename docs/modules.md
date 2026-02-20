@@ -12,8 +12,8 @@ Top-level config uses three layout areas:
     "left": [{ "type": "workspaces" }],
     "center": [{ "type": "exec", "command": "echo center" }],
     "right": [
-      { "type": "tray" },
       { "type": "pulseaudio" },
+      { "type": "tray" },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
       { "type": "clock" }
     ]
@@ -258,6 +258,7 @@ Behavior:
 - Uses native `libpulse` subscription callbacks for near-immediate updates.
 - On each relevant audio event, reads default sink volume/mute and default source mute state via PulseAudio introspection.
 - Detects device icon category from sink `active_port.name + device form factor` using Waybar-style priority matching.
+  - Match order: `headphone`, `speaker`, `hdmi`, `headset`, `hands-free`, `portable`, `car`, `hifi`, `phone`
 - Scroll up/down adjusts default sink volume by `scroll-step`.
 
 Styling:

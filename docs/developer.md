@@ -14,6 +14,7 @@ This document contains implementation-facing details that are intentionally kept
   - config parsing from raw map
   - widget initialization
 - `modules::build_module(...)` finds the registered factory by module type and initializes it.
+- PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`.
 
 ## Adding A Module
 

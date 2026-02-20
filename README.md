@@ -1,6 +1,6 @@
 # mybar
 
-A minimal Wayland taskbar scaffold using Rust + GTK4 + `gtk4-layer-shell`.
+A minimal Wayland taskbar using Rust + GTK4 + `gtk4-layer-shell`.
 
 Quick orientation for future sessions: `SESSION_NOTES.md`.
 Agent collaboration contract: `AGENTS.md`.
@@ -49,7 +49,7 @@ make ci
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system
-- PulseAudio volume module with scroll-step volume control and Waybar-style formatting
+- Native PulseAudio module with event-driven updates and scroll-step volume control
 - Default styling loaded from repo `style.css` (embedded at build time)
 
 ## Configuration And Styling
