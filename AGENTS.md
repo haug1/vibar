@@ -24,10 +24,12 @@ If dependencies change in `Cargo.toml`, update and commit `Cargo.lock`.
 
 ## Files That Must Stay In Sync
 
-When behavior, commands, or architecture consider(but also don't feel obliged to make) changes, update:
+When behavior, commands, architecture, or docs structure change, update:
 
 - `README.md` for user-facing usage/docs
 - `SESSION_NOTES.md` for concise future-session orientation
+- `docs/modules.md` for module config/styling behavior
+- `docs/developer.md` for architecture/extension workflow
 - `config.jsonc` example if config schema/defaults changed
 
 ## Safety
