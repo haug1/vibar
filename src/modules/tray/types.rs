@@ -25,11 +25,20 @@ pub(super) struct TrayConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct TrayIconPixmap {
+    pub(super) width: i32,
+    pub(super) height: i32,
+    pub(super) argb_data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct TrayItemSnapshot {
     pub(super) id: String,
     pub(super) destination: String,
     pub(super) path: String,
     pub(super) icon_name: String,
+    pub(super) icon_pixmap: Option<TrayIconPixmap>,
+    pub(super) icon_theme_path: Option<String>,
     pub(super) title: String,
 }
 

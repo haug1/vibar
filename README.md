@@ -119,7 +119,7 @@ Module schema:
   - left click: calls SNI `Activate`
   - right click: renders DBusMenu via SNI `Menu` + `com.canonical.dbusmenu` in a custom GTK popover (including nested submenus and `icon-name`/`icon-data` menu icons); falls back to SNI click methods
   - middle click: calls SNI `SecondaryActivate`
-  - current implementation uses `IconName`/`AttentionIconName` for icons (icon pixmap fallback is not implemented yet)
+  - icon rendering uses `IconName`/`AttentionIconName` and falls back to `IconPixmap`/`AttentionIconPixmap`
 
 ## Module Architecture
 
@@ -174,5 +174,4 @@ Suggested selectors:
 
 - Dynamic monitor hotplug handling (add/remove bars at runtime)
 - More module types and robust module lifecycle
-- StatusNotifier `IconPixmap` fallback for apps without icon names
 - Better config discovery/reload

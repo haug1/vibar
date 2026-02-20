@@ -1,7 +1,9 @@
+use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
 use glib::ControlFlow;
+use gtk::gdk::{MemoryFormat, MemoryTexture, Texture};
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, GestureClick, Image, Orientation, Widget};
 use serde_json::Value;
@@ -15,7 +17,10 @@ mod menu_ui;
 mod sni;
 mod types;
 
-use types::{TrayConfig, TrayItemSnapshot, MIN_ICON_SIZE, MIN_POLL_INTERVAL_SECS, MODULE_TYPE};
+use types::{
+    TrayConfig, TrayIconPixmap, TrayItemSnapshot, MIN_ICON_SIZE, MIN_POLL_INTERVAL_SECS,
+    MODULE_TYPE,
+};
 
 pub(crate) struct TrayFactory;
 
@@ -115,7 +120,7 @@ fn render_tray_items(container: &GtkBox, items: &[TrayItemSnapshot], icon_size: 
         button.set_focusable(false);
         button.set_tooltip_text(Some(&item.title));
 
-        let image = Image::from_icon_name(&item.icon_name);
+        let image = image_for_item(item, icon_size);
         image.set_pixel_size(icon_size);
         button.set_child(Some(&image));
 
@@ -150,6 +155,105 @@ fn render_tray_items(container: &GtkBox, items: &[TrayItemSnapshot], icon_size: 
 
         container.append(&button);
     }
+}
+
+fn image_for_item(item: &TrayItemSnapshot, icon_size: i32) -> Image {
+    if !item.icon_name.is_empty() {
+        let icon_path = Path::new(&item.icon_name);
+        if icon_path.is_absolute() {
+            let icon_file = gio::File::for_path(icon_path);
+            if let Ok(texture) = Texture::from_file(&icon_file) {
+                return Image::from_paintable(Some(&texture));
+            }
+        }
+    }
+
+    if let Some(display) = gtk::gdk::Display::default() {
+        let icon_theme = gtk::IconTheme::for_display(&display);
+        if let Some(theme_path) = item.icon_theme_path.as_deref() {
+            let theme_path = Path::new(theme_path);
+            if !icon_theme
+                .search_path()
+                .iter()
+                .any(|path| path == theme_path)
+            {
+                icon_theme.add_search_path(theme_path);
+            }
+        }
+
+        if !item.icon_name.is_empty() && icon_theme.has_icon(&item.icon_name) {
+            return Image::from_icon_name(&item.icon_name);
+        }
+    }
+
+    if let Some(pixmap) = item.icon_pixmap.as_ref() {
+        if let Some(image) = image_from_icon_pixmap(pixmap) {
+            return image;
+        }
+    }
+
+    let fallback_name = if item.icon_name.is_empty() {
+        "image-missing"
+    } else {
+        &item.icon_name
+    };
+    if fallback_name == "image-missing" && tray_debug_enabled() {
+        let pixmap_info = item
+            .icon_pixmap
+            .as_ref()
+            .map(|pixmap| format!("{}x{}", pixmap.width, pixmap.height))
+            .unwrap_or_else(|| "none".to_string());
+        eprintln!(
+            "mybar/tray: icon fallback image-missing id={} icon_name='{}' icon_theme_path='{}' pixmap={}",
+            item.id,
+            item.icon_name,
+            item.icon_theme_path.as_deref().unwrap_or(""),
+            pixmap_info
+        );
+    }
+    let image = Image::from_icon_name(fallback_name);
+    image.set_pixel_size(icon_size);
+    image
+}
+
+fn image_from_icon_pixmap(pixmap: &TrayIconPixmap) -> Option<Image> {
+    let width = usize::try_from(pixmap.width).ok()?;
+    let height = usize::try_from(pixmap.height).ok()?;
+    let pixel_count = width.checked_mul(height)?;
+    let expected_len = pixel_count.checked_mul(4)?;
+    if pixmap.argb_data.len() < expected_len {
+        return None;
+    }
+
+    let mut rgba = vec![0u8; expected_len];
+    for (src, dst) in pixmap
+        .argb_data
+        .chunks_exact(4)
+        .take(pixel_count)
+        .zip(rgba.chunks_exact_mut(4))
+    {
+        dst[0] = src[1];
+        dst[1] = src[2];
+        dst[2] = src[3];
+        dst[3] = src[0];
+    }
+
+    let rowstride = i32::try_from(width.checked_mul(4)?).ok()?;
+    let bytes = glib::Bytes::from_owned(rgba);
+    let texture = MemoryTexture::new(
+        pixmap.width,
+        pixmap.height,
+        MemoryFormat::R8g8b8a8,
+        &bytes,
+        usize::try_from(rowstride).ok()?,
+    );
+    Some(Image::from_paintable(Some(&texture)))
+}
+
+fn tray_debug_enabled() -> bool {
+    std::env::var("MYBAR_DEBUG_TRAY")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

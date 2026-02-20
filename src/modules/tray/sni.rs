@@ -5,7 +5,8 @@ use zbus::Error as ZbusError;
 use zbus::Result as ZbusResult;
 
 use super::types::{
-    TrayItemSnapshot, ITEM_INTERFACE, WATCHER_DESTINATION, WATCHER_INTERFACE, WATCHER_PATH,
+    TrayIconPixmap, TrayItemSnapshot, ITEM_INTERFACE, WATCHER_DESTINATION, WATCHER_INTERFACE,
+    WATCHER_PATH,
 };
 
 pub(super) fn activate_item(destination: String, path: String, x: i32, y: i32) {
@@ -146,7 +147,7 @@ fn fetch_item(
     destination: String,
     path: String,
 ) -> Option<TrayItemSnapshot> {
-    let (icon_name, title) = {
+    let (icon_name, icon_pixmap, icon_theme_path, title) = {
         let proxy = Proxy::new(
             connection,
             destination.as_str(),
@@ -165,7 +166,18 @@ fn fetch_item(
                     .ok()
                     .filter(|value: &String| !value.is_empty())
             })
-            .unwrap_or_else(|| "image-missing".to_string());
+            .unwrap_or_default();
+
+        let icon_pixmap = proxy
+            .get_property::<Vec<(i32, i32, Vec<u8>)>>("IconPixmap")
+            .ok()
+            .and_then(select_icon_pixmap)
+            .or_else(|| {
+                proxy
+                    .get_property::<Vec<(i32, i32, Vec<u8>)>>("AttentionIconPixmap")
+                    .ok()
+                    .and_then(select_icon_pixmap)
+            });
 
         let title = proxy
             .get_property::<String>("Title")
@@ -173,7 +185,12 @@ fn fetch_item(
             .filter(|value: &String| !value.is_empty())
             .unwrap_or_else(|| id.clone());
 
-        (icon_name, title)
+        let icon_theme_path = proxy
+            .get_property::<String>("IconThemePath")
+            .ok()
+            .filter(|value: &String| !value.is_empty());
+
+        (icon_name, icon_pixmap, icon_theme_path, title)
     };
 
     Some(TrayItemSnapshot {
@@ -181,8 +198,31 @@ fn fetch_item(
         destination,
         path,
         icon_name,
+        icon_pixmap,
+        icon_theme_path,
         title,
     })
+}
+
+fn select_icon_pixmap(entries: Vec<(i32, i32, Vec<u8>)>) -> Option<TrayIconPixmap> {
+    entries
+        .into_iter()
+        .filter_map(|(width, height, argb_data)| {
+            if width <= 0 || height <= 0 {
+                return None;
+            }
+            let expected_len = usize::try_from(width).ok()? * usize::try_from(height).ok()? * 4;
+            if argb_data.len() < expected_len {
+                return None;
+            }
+
+            Some(TrayIconPixmap {
+                width,
+                height,
+                argb_data,
+            })
+        })
+        .max_by_key(|pixmap| pixmap.width * pixmap.height)
 }
 
 fn tray_debug_enabled() -> bool {
@@ -198,4 +238,22 @@ fn is_method_missing_error(err: &ZbusError) -> bool {
             if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod"
                 || name.as_str() == "org.freedesktop.DBus.Error.UnknownInterface"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_icon_pixmap;
+
+    #[test]
+    fn select_icon_pixmap_picks_largest_valid_entry() {
+        let picked = select_icon_pixmap(vec![
+            (16, 16, vec![0; 16 * 16 * 4]),
+            (24, 24, vec![0; 24 * 24 * 4]),
+            (32, 32, vec![0; 16]),
+        ])
+        .expect("a valid pixmap should be selected");
+
+        assert_eq!(picked.width, 24);
+        assert_eq!(picked.height, 24);
+    }
 }

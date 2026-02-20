@@ -24,7 +24,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - Identical `exec` modules (`command` + `interval_secs`) share one background poller across all monitor windows
 - Config-driven `tray` module via `config.jsonc`
   - polls `org.kde.StatusNotifierWatcher` for tray items
-  - renders icon-name based tray buttons
+  - renders tray icons from icon names with `IconPixmap` fallback for non-theme icons
   - left click calls item `Activate`
   - right click renders DBusMenu (`Menu` + `com.canonical.dbusmenu`) in a custom GTK popover, including nested submenus and `icon-name`/`icon-data` menu icons, with fallback to item click methods
   - middle click calls item `SecondaryActivate`
