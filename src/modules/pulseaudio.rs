@@ -74,6 +74,10 @@ pub(crate) struct PulseAudioConfig {
 pub(crate) struct PulseAudioFormatIcons {
     #[serde(default)]
     pub(crate) headphone: Option<String>,
+    #[serde(default)]
+    pub(crate) speaker: Option<String>,
+    #[serde(default)]
+    pub(crate) hdmi: Option<String>,
     #[serde(rename = "hands-free", default)]
     pub(crate) hands_free: Option<String>,
     #[serde(default)]
@@ -84,6 +88,8 @@ pub(crate) struct PulseAudioFormatIcons {
     pub(crate) portable: Option<String>,
     #[serde(default)]
     pub(crate) car: Option<String>,
+    #[serde(default)]
+    pub(crate) hifi: Option<String>,
     #[serde(default = "default_volume_icons")]
     pub(crate) default: Vec<String>,
 }
@@ -106,11 +112,14 @@ struct ServerDefaults {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum IconKind {
     Headphone,
+    Speaker,
+    Hdmi,
     HandsFree,
     Headset,
     Phone,
     Portable,
     Car,
+    Hifi,
     Default,
 }
 
@@ -150,11 +159,14 @@ fn default_volume_icons() -> Vec<String> {
 fn default_format_icons() -> PulseAudioFormatIcons {
     PulseAudioFormatIcons {
         headphone: None,
+        speaker: None,
+        hdmi: None,
         hands_free: None,
         headset: None,
         phone: None,
         portable: None,
         car: None,
+        hifi: None,
         default: default_volume_icons(),
     }
 }
@@ -561,46 +573,23 @@ fn query_source_muted(
 
 fn snapshot_from_sink_info(info: &SinkInfo) -> SinkSnapshot {
     let volume = volume_to_percent(info.volume.avg());
-    let mut content = String::new();
-
-    if let Some(name) = info.name.as_ref() {
-        content.push_str(name);
-        content.push(' ');
-    }
-    if let Some(description) = info.description.as_ref() {
-        content.push_str(description);
-        content.push(' ');
-    }
-    if let Some(port) = info.active_port.as_ref() {
-        if let Some(name) = port.name.as_ref() {
-            content.push_str(name);
-            content.push(' ');
-        }
-        if let Some(description) = port.description.as_ref() {
-            content.push_str(description);
-            content.push(' ');
-        }
-    }
-
-    if let Some(form_factor) = info.proplist.get_str(properties::DEVICE_FORM_FACTOR) {
-        content.push_str(&form_factor);
-        content.push(' ');
-    }
-    if let Some(icon_name) = info.proplist.get_str(properties::DEVICE_ICON_NAME) {
-        content.push_str(&icon_name);
-        content.push(' ');
-    }
-    if let Some(device_description) = info.proplist.get_str(properties::DEVICE_DESCRIPTION) {
-        content.push_str(&device_description);
-    }
-
-    let lower = content.to_ascii_lowercase();
+    let port_name = info
+        .active_port
+        .as_ref()
+        .and_then(|port| port.name.as_ref())
+        .map(|name| name.to_string())
+        .unwrap_or_default();
+    let form_factor = info
+        .proplist
+        .get_str(properties::DEVICE_FORM_FACTOR)
+        .unwrap_or_default();
+    let lower = format!("{port_name}{form_factor}").to_ascii_lowercase();
 
     SinkSnapshot {
         volume,
         muted: info.mute,
         bluetooth: lower.contains("bluez") || lower.contains("bluetooth"),
-        icon_kind: classify_icon_kind(&lower),
+        icon_kind: classify_icon_kind_waybar_style(&lower),
     }
 }
 
@@ -680,26 +669,42 @@ fn percent_to_volume_delta(step: f64) -> Volume {
     Volume(value.max(1))
 }
 
-fn classify_icon_kind(content: &str) -> IconKind {
-    if content.contains("hands-free") || content.contains("handsfree") {
-        return IconKind::HandsFree;
+fn classify_icon_kind_waybar_style(content: &str) -> IconKind {
+    // Keep same priority order as Waybar's pulseaudio module.
+    if content.contains("headphone") {
+        return IconKind::Headphone;
+    }
+    if content.contains("speaker") {
+        return IconKind::Speaker;
+    }
+    if content.contains("hdmi") {
+        return IconKind::Hdmi;
     }
     if content.contains("headset") {
         return IconKind::Headset;
     }
-    if content.contains("headphone") {
-        return IconKind::Headphone;
+    if content.contains("hands-free") || content.contains("handsfree") {
+        return IconKind::HandsFree;
     }
     if content.contains("portable") {
         return IconKind::Portable;
     }
+    if contains_word(content, "car") {
+        return IconKind::Car;
+    }
+    if content.contains("hifi") {
+        return IconKind::Hifi;
+    }
     if content.contains("phone") {
         return IconKind::Phone;
     }
-    if content.contains("car") {
-        return IconKind::Car;
-    }
     IconKind::Default
+}
+
+fn contains_word(content: &str, needle: &str) -> bool {
+    content
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+        .any(|token| token == needle)
 }
 
 fn render_format(config: &PulseAudioConfig, state: &PulseState) -> String {
@@ -752,6 +757,12 @@ impl PulseAudioFormatIcons {
                 .as_deref()
                 .unwrap_or(ICON_HEADPHONE)
                 .to_string(),
+            IconKind::Speaker => self
+                .speaker
+                .as_deref()
+                .unwrap_or(ICON_VOLUME_HIGH)
+                .to_string(),
+            IconKind::Hdmi => self.hdmi.as_deref().unwrap_or(ICON_VOLUME_HIGH).to_string(),
             IconKind::HandsFree => self
                 .hands_free
                 .as_deref()
@@ -765,6 +776,7 @@ impl PulseAudioFormatIcons {
                 .unwrap_or(ICON_PORTABLE)
                 .to_string(),
             IconKind::Car => self.car.as_deref().unwrap_or(ICON_CAR).to_string(),
+            IconKind::Hifi => self.hifi.as_deref().unwrap_or(ICON_VOLUME_HIGH).to_string(),
             IconKind::Default => volume_icon_from_list(&self.default, volume),
         }
     }
@@ -863,5 +875,27 @@ mod tests {
     fn percent_to_volume_delta_converts_step() {
         let delta = percent_to_volume_delta(1.0);
         assert!(delta.0 > 0);
+    }
+
+    #[test]
+    fn classify_icon_kind_matches_waybar_order() {
+        assert_eq!(
+            classify_icon_kind_waybar_style("headphone speaker"),
+            IconKind::Headphone
+        );
+        assert_eq!(
+            classify_icon_kind_waybar_style("my speaker"),
+            IconKind::Speaker
+        );
+        assert_eq!(classify_icon_kind_waybar_style("dock hdmi"), IconKind::Hdmi);
+        assert_eq!(classify_icon_kind_waybar_style("usb hifi"), IconKind::Hifi);
+        assert_eq!(
+            classify_icon_kind_waybar_style("built in sound card"),
+            IconKind::Default
+        );
+        assert_eq!(
+            classify_icon_kind_waybar_style("usb car kit"),
+            IconKind::Car
+        );
     }
 }

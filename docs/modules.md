@@ -207,11 +207,14 @@ Schema:
   "format-source-muted": "",
   "format-icons": {
     "headphone": "",
+    "speaker": "",
+    "hdmi": "",
     "hands-free": "",
     "headset": "",
     "phone": "",
     "portable": "",
     "car": "",
+    "hifi": "",
     "default": ["", "", ""]
   },
   "click": "pavucontrol",
@@ -237,7 +240,7 @@ Fields:
 - `format-source-muted` (optional): source indicator when source is muted.
   - Default: ``
 - `format-icons` (optional): icon mapping object for sink types and volume.
-  - Supported keys: `headphone`, `hands-free`, `headset`, `phone`, `portable`, `car`, `default`
+  - Supported keys: `headphone`, `speaker`, `hdmi`, `headset`, `hands-free`, `portable`, `car`, `hifi`, `phone`, `default`
   - `default` is an array of volume-level icons.
   - Default: `["", "", ""]`
 - `click` (optional): shell command run on left click.
@@ -254,7 +257,7 @@ Behavior:
 
 - Uses native `libpulse` subscription callbacks for near-immediate updates.
 - On each relevant audio event, reads default sink volume/mute and default source mute state via PulseAudio introspection.
-- Detects Bluetooth/default sink characteristics from sink metadata/properties.
+- Detects device icon category from sink `active_port.name + device form factor` using Waybar-style priority matching.
 - Scroll up/down adjusts default sink volume by `scroll-step`.
 
 Styling:
