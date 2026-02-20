@@ -1,4 +1,3 @@
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -6,7 +5,7 @@ use std::time::Duration;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{EventControllerScroll, EventControllerScrollFlags, GestureClick, Label, Widget};
+use gtk::{EventControllerScroll, EventControllerScrollFlags, Label, Widget};
 use libpulse_binding as pulse;
 use pulse::callbacks::ListResult;
 use pulse::context::introspect::{ServerInfo, SinkInfo};
@@ -19,7 +18,7 @@ use pulse::volume::Volume;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::{ModuleBuildContext, ModuleConfig};
+use crate::modules::{attach_primary_click_command, ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -192,14 +191,7 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
         label.add_css_class(&class_name);
     }
 
-    if let Some(command) = click_command {
-        label.add_css_class("clickable");
-        let click = GestureClick::builder().button(1).build();
-        click.connect_pressed(move |_, _, _, _| {
-            run_click_command(&command);
-        });
-        label.add_controller(click);
-    }
+    attach_primary_click_command(&label, click_command);
 
     let (worker_tx, worker_rx) = mpsc::channel::<WorkerCommand>();
 
@@ -258,13 +250,6 @@ pub(crate) fn normalized_scroll_step(step: f64) -> f64 {
     } else {
         step
     }
-}
-
-fn run_click_command(command: &str) {
-    let command = command.to_string();
-    std::thread::spawn(move || {
-        let _ = Command::new("sh").arg("-c").arg(command).spawn();
-    });
 }
 
 fn run_native_loop(

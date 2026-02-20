@@ -60,13 +60,19 @@ Styling:
 Schema:
 
 ```json
-{ "type": "clock", "format": "%a %d. %b %H:%M:%S" }
+{
+  "type": "clock",
+  "format": "%a %d. %b %H:%M:%S",
+  "click": "optional shell command"
+}
 ```
 
 Fields:
 
 - `format` (optional): `chrono` format string.
   - Default: `%a %d. %b %H:%M:%S`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
 
 Behavior:
 
@@ -75,6 +81,7 @@ Behavior:
 Styling:
 
 - Label classes: `.module.clock`
+- Click-enabled labels also include: `.clickable`
 
 ## `exec`
 
@@ -84,6 +91,7 @@ Schema:
 {
   "type": "exec",
   "command": "your shell command",
+  "click": "optional shell command",
   "interval_secs": 5,
   "class": "optional-css-class"
 }
@@ -92,6 +100,8 @@ Schema:
 Fields:
 
 - `command` (required): shell command executed with `sh -c`.
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `5`
   - Minimum: `1` (values below are clamped)
@@ -106,6 +116,7 @@ Behavior:
 Styling:
 
 - Label classes: `.module.exec`
+- Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 
 ## `disk`

@@ -9,7 +9,7 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::{ModuleBuildContext, ModuleConfig};
+use crate::modules::{attach_primary_click_command, ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -19,6 +19,10 @@ pub(crate) const MODULE_TYPE: &str = "exec";
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct ExecConfig {
     pub(crate) command: String,
+    #[serde(default)]
+    pub(crate) click: Option<String>,
+    #[serde(rename = "on-click", default)]
+    pub(crate) on_click: Option<String>,
     #[serde(default = "default_exec_interval")]
     pub(crate) interval_secs: u32,
     #[serde(default)]
@@ -40,7 +44,14 @@ impl ModuleFactory for ExecFactory {
 
     fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
-        Ok(build_exec_module(parsed.command, parsed.interval_secs, parsed.class).upcast())
+        let click_command = parsed.click.or(parsed.on_click);
+        Ok(build_exec_module(
+            parsed.command,
+            click_command,
+            parsed.interval_secs,
+            parsed.class,
+        )
+        .upcast())
     }
 }
 
@@ -58,6 +69,7 @@ pub(crate) fn parse_config(module: &ModuleConfig) -> Result<ExecConfig, String> 
 
 pub(crate) fn build_exec_module(
     command: String,
+    click_command: Option<String>,
     interval_secs: u32,
     class: Option<String>,
 ) -> Label {
@@ -76,6 +88,8 @@ pub(crate) fn build_exec_module(
     if let Some(class_name) = class {
         label.add_css_class(&class_name);
     }
+
+    attach_primary_click_command(&label, click_command);
 
     let receiver = subscribe_shared_exec_output(command, effective_interval_secs);
 
@@ -203,6 +217,7 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    use serde_json::json;
     use serde_json::Map;
 
     use super::*;
@@ -219,6 +234,31 @@ mod tests {
         let module = ModuleConfig::new(MODULE_TYPE, Map::new());
         let err = parse_config(&module).expect_err("missing command should fail");
         assert!(err.contains("invalid exec module config"));
+    }
+
+    #[test]
+    fn parse_config_supports_click_aliases() {
+        let click_module = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "command": "echo ok",
+                "click": "foo"
+            }))
+            .expect("module config map should parse"),
+        );
+        let click_cfg = parse_config(&click_module).expect("click config should parse");
+        assert_eq!(click_cfg.click.as_deref(), Some("foo"));
+
+        let on_click_module = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "command": "echo ok",
+                "on-click": "bar"
+            }))
+            .expect("module config map should parse"),
+        );
+        let on_click_cfg = parse_config(&on_click_module).expect("on-click config should parse");
+        assert_eq!(on_click_cfg.on_click.as_deref(), Some("bar"));
     }
 
     #[test]

@@ -17,9 +17,11 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - 3 layout areas: `left`, `center`, `right`
 - Config-driven modules (current set documented in `docs/modules.md`)
 - Workspace module is output-local per monitor and event-driven via sway IPC
+- Clock module supports optional `click` / `on-click` shell actions
 - PulseAudio module supports click actions, Waybar-style format keys, scroll volume, and event-driven native `libpulse` updates
+- Exec module supports optional `click` / `on-click` shell actions
 - Default CSS loaded from `style.css` with translucent module styling and hover states
-- Click-enabled label modules (`disk`, `pulseaudio`) add `.clickable` CSS class when click commands are configured
+- Shared helper `modules::attach_primary_click_command(...)` centralizes click-command wiring and `.clickable` CSS class behavior across modules
 
 ## Standard Commands
 

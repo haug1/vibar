@@ -5,7 +5,8 @@ pub(crate) mod pulseaudio;
 pub(crate) mod sway;
 pub(crate) mod tray;
 
-use gtk::Widget;
+use gtk::prelude::*;
+use gtk::{GestureClick, Widget};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -55,6 +56,25 @@ pub(crate) fn build_module(
         .ok_or_else(|| format!("unknown module type '{}'", config.module_type))?;
 
     factory.init(config, context)
+}
+
+pub(crate) fn attach_primary_click_command(widget: &impl IsA<Widget>, command: Option<String>) {
+    let Some(command) = command else {
+        return;
+    };
+
+    widget.add_css_class("clickable");
+    let click = GestureClick::builder().button(1).build();
+    click.connect_pressed(move |_, _, _, _| {
+        let command = command.clone();
+        std::thread::spawn(move || {
+            let _ = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(command)
+                .spawn();
+        });
+    });
+    widget.add_controller(click);
 }
 
 #[cfg(test)]

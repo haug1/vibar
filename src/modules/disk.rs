@@ -3,11 +3,11 @@ use std::time::Duration;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{GestureClick, Label, Widget};
+use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::{ModuleBuildContext, ModuleConfig};
+use crate::modules::{attach_primary_click_command, ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -104,14 +104,7 @@ pub(crate) fn build_disk_module(
         label.add_css_class(&class_name);
     }
 
-    if let Some(command) = click_command {
-        label.add_css_class("clickable");
-        let click = GestureClick::builder().button(1).build();
-        click.connect_pressed(move |_, _, _, _| {
-            run_click_command(&command);
-        });
-        label.add_controller(click);
-    }
+    attach_primary_click_command(&label, click_command);
 
     let effective_interval_secs = normalized_disk_interval(interval_secs);
     if effective_interval_secs != interval_secs {
@@ -144,13 +137,6 @@ pub(crate) fn build_disk_module(
     });
 
     label
-}
-
-fn run_click_command(command: &str) {
-    let command = command.to_string();
-    std::thread::spawn(move || {
-        let _ = Command::new("sh").arg("-c").arg(command).spawn();
-    });
 }
 
 fn read_disk_status(path: &str) -> Result<DiskStatus, String> {

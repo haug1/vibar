@@ -5,7 +5,7 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::modules::{ModuleBuildContext, ModuleConfig};
+use crate::modules::{attach_primary_click_command, ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -16,6 +16,10 @@ pub(crate) const MODULE_TYPE: &str = "clock";
 pub(crate) struct ClockConfig {
     #[serde(default)]
     pub(crate) format: Option<String>,
+    #[serde(default)]
+    pub(crate) click: Option<String>,
+    #[serde(rename = "on-click", default)]
+    pub(crate) on_click: Option<String>,
 }
 
 pub(crate) struct ClockFactory;
@@ -29,7 +33,8 @@ impl ModuleFactory for ClockFactory {
 
     fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
-        Ok(build_clock_module(parsed.format).upcast())
+        let click_command = parsed.click.or(parsed.on_click);
+        Ok(build_clock_module(parsed.format, click_command).upcast())
     }
 }
 
@@ -51,10 +56,11 @@ fn parse_config(module: &ModuleConfig) -> Result<ClockConfig, String> {
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-pub(crate) fn build_clock_module(format: Option<String>) -> Label {
+pub(crate) fn build_clock_module(format: Option<String>, click_command: Option<String>) -> Label {
     let label = Label::new(None);
     label.add_css_class("module");
     label.add_css_class("clock");
+    attach_primary_click_command(&label, click_command);
 
     let fmt = format.unwrap_or_else(|| DEFAULT_CLOCK_FMT.to_string());
 
@@ -79,6 +85,7 @@ pub(crate) fn build_clock_module(format: Option<String>) -> Label {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
     use serde_json::Map;
 
     use super::*;
@@ -88,5 +95,28 @@ mod tests {
         let module = ModuleConfig::new("exec", Map::new());
         let err = parse_config(&module).expect_err("wrong type should fail");
         assert!(err.contains("expected module type 'clock'"));
+    }
+
+    #[test]
+    fn parse_config_supports_click_aliases() {
+        let click_module = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "click": "foo"
+            }))
+            .expect("module config map should parse"),
+        );
+        let click_cfg = parse_config(&click_module).expect("click config should parse");
+        assert_eq!(click_cfg.click.as_deref(), Some("foo"));
+
+        let on_click_module = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "on-click": "bar"
+            }))
+            .expect("module config map should parse"),
+        );
+        let on_click_cfg = parse_config(&on_click_module).expect("on-click config should parse");
+        assert_eq!(on_click_cfg.on_click.as_deref(), Some("bar"));
     }
 }
