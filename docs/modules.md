@@ -22,6 +22,15 @@ Top-level config uses three layout areas:
 
 Each entry in an area is a module object with a required `"type"` key.
 
+## Styling Overview
+
+`style.css` is loaded by default. Common layout selectors:
+
+- `.bar`
+- `.left`
+- `.center`
+- `.right`
+
 ## `workspaces`
 
 Minimal schema:
@@ -36,6 +45,12 @@ Behavior:
 - Updates on workspace/output events (event-driven refresh).
 - On multi-monitor setups, each bar window shows only workspaces for its output.
 - Clicking a workspace button focuses that workspace in sway.
+
+Styling:
+
+- Container classes: `.module.workspaces`
+- Per-workspace button class: `.menu-button`
+- Active state classes: `.menu-button.active`, `.menu-button.workspace-active`
 
 ## `clock`
 
@@ -53,6 +68,10 @@ Fields:
 Behavior:
 
 - Updates every second on GTK main loop.
+
+Styling:
+
+- Label classes: `.module.clock`
 
 ## `exec`
 
@@ -80,6 +99,11 @@ Behavior:
 - Shows command output in a label.
 - If stdout is empty, stderr is used.
 - Identical `command` + `interval_secs` instances share one backend poller across bar windows.
+
+Styling:
+
+- Label classes: `.module.exec`
+- Optional extra class via `class` field.
 
 ## `disk`
 
@@ -123,6 +147,11 @@ Behavior:
 - Polls disk stats with `df -B1 -P <path>`.
 - Values are rendered in binary units (`B`, `K`, `M`, `G`, `T`, `P`).
 
+Styling:
+
+- Label classes: `.module.disk`
+- Optional extra class via `class` field.
+
 ## `tray`
 
 Schema:
@@ -153,3 +182,10 @@ Behavior:
 - Right click requests SNI menu and renders DBusMenu in GTK popover.
 - Middle click triggers SNI `SecondaryActivate`.
 - Icon lookup prefers theme icon names, then pixmap fallbacks.
+
+Styling:
+
+- Tray container classes: `.module.tray`
+- Item class: `.tray-item`
+- Menu classes: `.tray-menu-popover`, `.tray-menu-content`, `.tray-menu-item`
+- Optional extra class via `class` field.

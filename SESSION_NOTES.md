@@ -23,7 +23,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - `exec.interval_secs` defaults to `5` and is clamped to a minimum of `1`
   - Identical `exec` modules (`command` + `interval_secs`) share one background poller across all monitor windows
 - Config-driven `disk` modules via `config.jsonc`
-  - polls `df -B1P` and supports format placeholders (`{free}`, `{used}`, `{total}`, `{path}`, `{percentage_free}`, `{percentage_used}`)
+  - polls `df -B1 -P` and supports format placeholders (`{free}`, `{used}`, `{total}`, `{path}`, `{percentage_free}`, `{percentage_used}`)
   - `format` defaults to `{free}`, `path` defaults to `/`
   - left-click command via `click` (and `on-click` alias)
   - `interval_secs` defaults to `30` and is clamped to a minimum of `1`
@@ -68,6 +68,8 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - CI: `.github/workflows/ci.yml`
 - User config example: `config.jsonc`
 - Module config docs: `docs/modules.md`
+  - includes module-level styling selectors/state classes
+- Developer docs: `docs/developer.md`
 
 ## Conventions
 
