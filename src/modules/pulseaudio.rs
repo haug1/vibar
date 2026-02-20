@@ -1,4 +1,6 @@
+use std::io::{BufRead, BufReader};
 use std::process::Command;
+use std::process::Stdio;
 use std::time::Duration;
 
 use glib::{ControlFlow, Propagation};
@@ -11,7 +13,8 @@ use crate::modules::{ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
-const POLL_INTERVAL_MILLIS: u64 = 1000;
+const UI_DRAIN_INTERVAL_MILLIS: u64 = 200;
+const SUBSCRIBE_RECONNECT_DELAY_SECS: u64 = 2;
 const DEFAULT_SCROLL_STEP: f64 = 1.0;
 const DEFAULT_FORMAT: &str = "{volume}% {icon}  {format_source}";
 const DEFAULT_FORMAT_BLUETOOTH: &str = "{volume}% {icon} {format_source}";
@@ -190,16 +193,9 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
 
     let (sender, receiver) = std::sync::mpsc::channel::<String>();
     let render_config = config.clone();
-    std::thread::spawn(move || loop {
-        let text = match read_pulseaudio_state() {
-            Ok(state) => render_format(&render_config, &state),
-            Err(err) => format!("audio error: {err}"),
-        };
-        let _ = sender.send(text);
-        std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MILLIS));
-    });
+    std::thread::spawn(move || run_subscribe_loop(sender, render_config));
 
-    glib::timeout_add_local(Duration::from_millis(200), {
+    glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
         let label = label.clone();
         move || {
             while let Ok(text) = receiver.try_recv() {
@@ -246,6 +242,65 @@ fn format_step_value(step: f64) -> String {
         .trim_end_matches('0')
         .trim_end_matches('.')
         .to_string()
+}
+
+fn run_subscribe_loop(sender: std::sync::mpsc::Sender<String>, config: PulseAudioConfig) {
+    loop {
+        send_rendered_state(&sender, &config);
+        if let Err(err) = subscribe_for_updates(&sender, &config) {
+            let _ = sender.send(format!("audio error: {err}"));
+            std::thread::sleep(Duration::from_secs(SUBSCRIBE_RECONNECT_DELAY_SECS));
+        }
+    }
+}
+
+fn send_rendered_state(sender: &std::sync::mpsc::Sender<String>, config: &PulseAudioConfig) {
+    let text = match read_pulseaudio_state() {
+        Ok(state) => render_format(config, &state),
+        Err(err) => format!("audio error: {err}"),
+    };
+    let _ = sender.send(text);
+}
+
+fn subscribe_for_updates(
+    sender: &std::sync::mpsc::Sender<String>,
+    config: &PulseAudioConfig,
+) -> Result<(), String> {
+    let mut child = Command::new("pactl")
+        .arg("subscribe")
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("failed to run pactl subscribe: {err}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "pactl subscribe did not provide stdout".to_string())?;
+    let reader = BufReader::new(stdout);
+
+    for line in reader.lines() {
+        let line = line.map_err(|err| format!("failed reading pactl subscribe output: {err}"))?;
+        if is_subscription_event_relevant(&line) {
+            send_rendered_state(sender, config);
+        }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|err| format!("failed waiting on pactl subscribe: {err}"))?;
+    if !status.success() {
+        return Err(format!("pactl subscribe exited with status {status}"));
+    }
+
+    Err("pactl subscribe stream ended".to_string())
+}
+
+fn is_subscription_event_relevant(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains(" on sink ")
+        || lower.contains(" on source ")
+        || lower.contains(" on server ")
+        || lower.contains(" on card ")
 }
 
 fn read_pulseaudio_state() -> Result<PulseState, String> {
@@ -601,5 +656,15 @@ Sink #2
         assert_eq!(volume_icon_from_list(&icons, 0), "low");
         assert_eq!(volume_icon_from_list(&icons, 50), "med");
         assert_eq!(volume_icon_from_list(&icons, 100), "high");
+    }
+
+    #[test]
+    fn subscription_event_filter_matches_audio_updates() {
+        assert!(is_subscription_event_relevant("Event 'change' on sink #1"));
+        assert!(is_subscription_event_relevant("Event 'new' on source #2"));
+        assert!(is_subscription_event_relevant(
+            "Event 'remove' on server #0"
+        ));
+        assert!(!is_subscription_event_relevant("Event 'new' on client #12"));
     }
 }

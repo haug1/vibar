@@ -17,7 +17,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - 3 layout areas: `left`, `center`, `right`
 - Config-driven modules (current set documented in `docs/modules.md`)
 - Workspace module is output-local per monitor and event-driven via sway IPC
-- PulseAudio module supports click actions, Waybar-style format keys, and scroll volume
+- PulseAudio module supports click actions, Waybar-style format keys, scroll volume, and event-driven (`pactl subscribe`) updates
 - Default CSS loaded from `style.css`
 
 ## Standard Commands
