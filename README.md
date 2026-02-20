@@ -66,3 +66,7 @@ By default the app reads `./config.jsonc` if it exists. If it is missing or inva
 
 - Module configuration and styling selectors: [`docs/modules.md`](./docs/modules.md)
 - Developer architecture and extension notes: [`docs/developer.md`](./docs/developer.md)
+
+## Acknowledgements
+
+- [Waybar](https://github.com/Alexays/Waybar) for long-running status bar design ideas and overall behavior references that influenced this project.
