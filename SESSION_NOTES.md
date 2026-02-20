@@ -67,6 +67,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - OS/bootstrap scripts: `scripts/install-deps.sh`, `scripts/build.sh`
 - CI: `.github/workflows/ci.yml`
 - User config example: `config.jsonc`
+- Module config docs: `docs/modules.md`
 
 ## Conventions
 

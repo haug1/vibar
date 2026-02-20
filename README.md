@@ -88,6 +88,8 @@ Run under a Wayland compositor. The workspace module expects sway IPC and subscr
 
 By default the app reads `./config.jsonc` if it exists. If it is missing or invalid, built-in defaults are used.
 
+Full module configuration reference lives in `docs/modules.md`.
+
 Example:
 
 ```jsonc
@@ -111,23 +113,8 @@ Example:
 
 Module schema:
 
-- `workspaces`: `{ "type": "workspaces" }`
-- `clock`: `{ "type": "clock", "format": "%a %d. %b %H:%M:%S" }`
-- `exec`: `{ "type": "exec", "command": "your shell command", "interval_secs": 5, "class": "optional-css-class" }`
-  - `interval_secs` defaults to `5` and values below `1` are clamped to `1`
-- `disk`: `{ "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin", "path": "/", "interval_secs": 30, "class": "optional-css-class" }`
-  - `format` defaults to `{free}`
-  - supported placeholders: `{free}`, `{used}`, `{total}`, `{path}`, `{percentage_free}`, `{percentage_used}`
-  - `path` defaults to `/`
-  - `interval_secs` defaults to `30` and values below `1` are clamped to `1`
-  - `click` runs a shell command on left click (`on-click` alias also supported)
-- `tray`: `{ "type": "tray", "icon_size": 16, "poll_interval_secs": 2, "class": "optional-css-class" }`
-  - `icon_size` defaults to `16` and values below `8` are clamped
-  - `poll_interval_secs` defaults to `2` and values below `1` are clamped
-  - left click: calls SNI `Activate`
-  - right click: renders DBusMenu via SNI `Menu` + `com.canonical.dbusmenu` in a custom GTK popover (including nested submenus and `icon-name`/`icon-data` menu icons); falls back to SNI click methods
-  - middle click: calls SNI `SecondaryActivate`
-  - icon rendering uses `IconName`/`AttentionIconName` and falls back to `IconPixmap`/`AttentionIconPixmap`
+- `workspaces`, `clock`, `exec`, `disk`, `tray`
+- See `docs/modules.md` for full schemas, defaults, placeholders, and behavior.
 
 ## Module Architecture
 
