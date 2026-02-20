@@ -193,6 +193,7 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
     }
 
     if let Some(command) = click_command {
+        label.add_css_class("clickable");
         let click = GestureClick::builder().button(1).build();
         click.connect_pressed(move |_, _, _, _| {
             run_click_command(&command);

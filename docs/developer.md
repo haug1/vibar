@@ -36,3 +36,4 @@ This document contains implementation-facing details that are intentionally kept
 
 - Keep lockfile-based builds (`--locked`) for reproducibility.
 - Keep `README.md` concise and point to expanded docs in `docs/`.
+- For label-based modules with click actions (`disk`, `pulseaudio`), add CSS class `.clickable` when wiring click handlers so hover styling targets only interactive labels.

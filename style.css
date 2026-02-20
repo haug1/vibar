@@ -1,44 +1,72 @@
+.vibar-window {
+  background: transparent;
+}
+
 .bar {
-  background: rgba(18, 20, 24, 0.92);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  color: #d9dee8;
-  min-height: 34px;
-  padding: 4px 8px;
+  background: linear-gradient(
+    180deg,
+    rgba(38, 45, 58, 0.16) 0%,
+    rgba(18, 21, 28, 0.24) 100%
+  );
+  border-top: 1px solid rgba(173, 196, 230, 0.35);
+  color: #eaf0fb;
+  min-height: 36px;
+  padding: 5px 10px;
 }
 
 .left,
 .center,
 .right {
-  padding: 0 4px;
+  padding: 0 5px;
+}
+
+.center {
+  font-weight: 600;
 }
 
 .module {
-  color: #d9dee8;
+  color: #dce5f6;
+  opacity: 0.88;
+}
+
+.menu-button,
+.tray-item,
+.tray-menu-item,
+.module.clickable {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
 }
 
 .workspaces {
 }
 
 .menu-button {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(166, 194, 236, 0.12);
+  border: 1px solid rgba(176, 204, 242, 0.36);
   border-radius: 8px;
-  color: #c8d0de;
+  color: #dae7fd;
   font-weight: 600;
   min-width: 28px;
-  padding: 3px 8px;
+  opacity: 0.93;
+  padding: 4px 10px;
 }
 
 .menu-button:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #f3f6fb;
+  background: rgba(140, 187, 245, 0.25);
+  border-color: rgba(156, 203, 255, 0.62);
+  color: #f8fbff;
+  opacity: 1;
 }
 
 .menu-button.active,
 .menu-button.workspace-active {
-  background: #55c2ff;
-  border-color: #55c2ff;
-  color: #0b111a;
+  background: linear-gradient(180deg, #73d9ff 0%, #5cb7ff 100%);
+  border-color: #8de4ff;
+  color: #07111d;
+  opacity: 1;
 }
 
 .menu-button:focus,
@@ -47,43 +75,69 @@
   box-shadow: none;
 }
 
+.module.clickable {
+  background: rgba(146, 177, 222, 0.12);
+  border: 1px solid rgba(176, 206, 245, 0.22);
+  border-radius: 8px;
+  padding: 2px 8px;
+}
+
+.module.clickable:hover {
+  background: rgba(121, 182, 255, 0.24);
+  border-color: rgba(156, 214, 255, 0.54);
+  color: #f8fbff;
+  opacity: 1;
+}
+
 .clock,
 .exec {
-  color: #e6ebf5;
+  color: #e6eefb;
   font-weight: 500;
+  opacity: 0.95;
 }
 
 .tray {
 }
 
 .tray-item {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(166, 194, 236, 0.1);
+  border: 1px solid rgba(176, 204, 242, 0.28);
   border-radius: 8px;
   min-width: 24px;
   min-height: 24px;
+  opacity: 0.94;
   padding: 2px;
 }
 
 .tray-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(140, 187, 245, 0.24);
+  border-color: rgba(156, 203, 255, 0.58);
+  opacity: 1;
 }
 
 .tray-item image {
-  color: #e6ebf5;
+  color: #eef5ff;
 }
 
 .tray-menu-popover contents {
-  padding: 4px;
+  background: rgba(16, 19, 25, 0.95);
+  border: 1px solid rgba(179, 205, 240, 0.24);
+  border-radius: 10px;
+  color: #e3ecfd;
+  padding: 5px;
 }
 
 .tray-menu-item {
+  border-radius: 7px;
   min-height: 26px;
+  opacity: 0.95;
   padding: 4px 8px;
 }
 
-.tray-menu-item label {
-  text-align: left;
+.tray-menu-item:hover {
+  background: rgba(126, 181, 249, 0.22);
+  color: #f7fbff;
+  opacity: 1;
 }
 
 /* Avoid GTK warnings when popover-internal scrollbar slider gizmos inherit
@@ -98,4 +152,5 @@
 
 .workspace-status {
   color: #ff9090;
+  opacity: 1;
 }

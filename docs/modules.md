@@ -31,6 +31,8 @@ Each entry in an area is a module object with a required `"type"` key.
 - `.left`
 - `.center`
 - `.right`
+- `.module` (base module label styling and default opacity)
+- `.module.clickable` (applied when a label-backed module has click actions)
 
 ## `workspaces`
 
@@ -151,6 +153,7 @@ Behavior:
 Styling:
 
 - Label classes: `.module.disk`
+- Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 
 ## `tray`
@@ -264,4 +267,5 @@ Behavior:
 Styling:
 
 - Label classes: `.module.pulseaudio`
+- Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.

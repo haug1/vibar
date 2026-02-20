@@ -51,6 +51,7 @@ make ci
 - Configurable module system
 - Native PulseAudio module with event-driven updates and scroll-step volume control
 - Default styling loaded from repo `style.css` (embedded at build time)
+  - translucent base theme with hover states for clickable UI elements
 
 ## Configuration And Styling
 

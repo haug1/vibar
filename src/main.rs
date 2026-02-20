@@ -58,6 +58,7 @@ fn build_window(
         .title("vibar")
         .decorated(false)
         .build();
+    window.add_css_class("vibar-window");
 
     window.init_layer_shell();
     window.set_layer(Layer::Top);
