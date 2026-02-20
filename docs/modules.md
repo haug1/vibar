@@ -13,6 +13,7 @@ Top-level config uses three layout areas:
     "center": [{ "type": "exec", "command": "echo center" }],
     "right": [
       { "type": "tray" },
+      { "type": "pulseaudio" },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
       { "type": "clock" }
     ]
@@ -188,4 +189,74 @@ Styling:
 - Tray container classes: `.module.tray`
 - Item class: `.tray-item`
 - Menu classes: `.tray-menu-popover`, `.tray-menu-content`, `.tray-menu-item`
+- Optional extra class via `class` field.
+
+## `pulseaudio`
+
+Schema:
+
+```json
+{
+  "type": "pulseaudio",
+  "scroll-step": 1,
+  "format": "{volume}% {icon}  {format_source}",
+  "format-bluetooth": "{volume}% {icon} {format_source}",
+  "format-bluetooth-muted": " {icon} {format_source}",
+  "format-muted": " {format_source}",
+  "format-source": "",
+  "format-source-muted": "",
+  "format-icons": {
+    "headphone": "",
+    "hands-free": "",
+    "headset": "",
+    "phone": "",
+    "portable": "",
+    "car": "",
+    "default": ["", "", ""]
+  },
+  "click": "pavucontrol",
+  "class": "optional-css-class"
+}
+```
+
+Fields:
+
+- `scroll-step` (optional): amount in percent changed per scroll event.
+  - Default: `1`
+  - Values `<= 0` disable scroll volume changes.
+- `format` (optional): default output format.
+  - Default: `{volume}% {icon}  {format_source}`
+- `format-bluetooth` (optional): format used for Bluetooth sinks.
+  - Default: `{volume}% {icon} {format_source}`
+- `format-bluetooth-muted` (optional): format used for muted Bluetooth sinks.
+  - Default: ` {icon} {format_source}`
+- `format-muted` (optional): format used for muted non-Bluetooth sinks.
+  - Default: ` {format_source}`
+- `format-source` (optional): source indicator when source is unmuted.
+  - Default: ``
+- `format-source-muted` (optional): source indicator when source is muted.
+  - Default: ``
+- `format-icons` (optional): icon mapping object for sink types and volume.
+  - Supported keys: `headphone`, `hands-free`, `headset`, `phone`, `portable`, `car`, `default`
+  - `default` is an array of volume-level icons.
+  - Default: `["", "", ""]`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
+- `class` (optional): extra CSS class on the module label.
+
+Format placeholders:
+
+- `{volume}`
+- `{icon}`
+- `{format_source}`
+
+Behavior:
+
+- Polls `pactl` for default sink volume/mute state and default source mute state.
+- Detects Bluetooth/default sink characteristics from `pactl list sinks`.
+- Scroll up/down adjusts default sink volume by `scroll-step`.
+
+Styling:
+
+- Label classes: `.module.pulseaudio`
 - Optional extra class via `class` field.

@@ -49,6 +49,7 @@ make ci
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system
+- PulseAudio volume module with scroll-step volume control and Waybar-style formatting
 - Default styling loaded from repo `style.css` (embedded at build time)
 
 ## Configuration And Styling
