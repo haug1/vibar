@@ -8,8 +8,8 @@ use super::types::{
     TrayItemSnapshot, ITEM_INTERFACE, WATCHER_DESTINATION, WATCHER_INTERFACE, WATCHER_PATH,
 };
 
-pub(super) fn activate_item(destination: String, path: String) {
-    call_item_method(destination, path, "Activate", 0, 0);
+pub(super) fn activate_item(destination: String, path: String, x: i32, y: i32) {
+    call_item_method(destination, path, "Activate", x, y);
 }
 
 pub(super) fn secondary_activate_item(destination: String, path: String, x: i32, y: i32) {

@@ -123,10 +123,10 @@ fn render_tray_items(container: &GtkBox, items: &[TrayItemSnapshot], icon_size: 
         let path = item.path.clone();
         let click_button = button.clone();
         let click = GestureClick::builder().button(0).build();
-        click.connect_released(move |gesture, _, x, y| {
+        click.connect_pressed(move |gesture, _, x, y| {
             let current_button = gesture.current_button();
             match current_button {
-                1 => sni::activate_item(destination.clone(), path.clone()),
+                1 => sni::activate_item(destination.clone(), path.clone(), x as i32, y as i32),
                 2 => sni::secondary_activate_item(
                     destination.clone(),
                     path.clone(),
