@@ -22,6 +22,11 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Config-driven `exec` modules via `config.jsonc`
   - `exec.interval_secs` defaults to `5` and is clamped to a minimum of `1`
   - Identical `exec` modules (`command` + `interval_secs`) share one background poller across all monitor windows
+- Config-driven `disk` modules via `config.jsonc`
+  - polls `df -B1P` and supports format placeholders (`{free}`, `{used}`, `{total}`, `{path}`, `{percentage_free}`, `{percentage_used}`)
+  - `format` defaults to `{free}`, `path` defaults to `/`
+  - left-click command via `click` (and `on-click` alias)
+  - `interval_secs` defaults to `30` and is clamped to a minimum of `1`
 - Config-driven `tray` module via `config.jsonc`
   - polls `org.kde.StatusNotifierWatcher` for tray items
   - renders tray icons from icon names with `IconPixmap` fallback for non-theme icons
@@ -52,6 +57,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
   - `ModuleConfig` is string-keyed (`type` + raw config map) in `src/modules/mod.rs`.
   - Each module file owns typed config parsing + widget init behind `ModuleFactory`.
   - `modules::build_module` resolves factory by module type and initializes dynamically.
+- Disk module: `src/modules/disk.rs`
 - Tray module: `src/modules/tray/` (`mod.rs`, `sni.rs`, `menu_dbus.rs`, `menu_ui.rs`, `types.rs`)
 - Workspace module: `src/modules/sway/workspace.rs`
 - Rust deps: `Cargo.toml`

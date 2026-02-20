@@ -76,6 +76,7 @@ make ci
   - `workspaces` (default in `left`, via sway IPC; updates immediately on workspace/output events and only shows workspaces for the bar window's output)
   - `clock` (default in `right`, updates every second on GTK main loop)
   - `exec` (runs shell command periodically and displays output, minimum interval is 1 second; identical `command` + `interval_secs` instances share one backend poller across bar windows)
+  - `disk` (polls `df` for filesystem stats and renders placeholders like `{free}`; optional click command)
   - `tray` (StatusNotifier-based app tray; polls watcher items, activates on left click, requests context menu on right click)
 - Default styling loaded from repo `style.css` (embedded at build time)
 
@@ -101,6 +102,7 @@ Example:
     ],
     right: [
       { type: "tray", icon_size: 16, poll_interval_secs: 2 },
+      { type: "disk", format: "{free} \uf0a0 ", click: "dolphin" },
       { type: "clock", format: "%a %d. %b %H:%M:%S" }
     ]
   }
@@ -113,6 +115,12 @@ Module schema:
 - `clock`: `{ "type": "clock", "format": "%a %d. %b %H:%M:%S" }`
 - `exec`: `{ "type": "exec", "command": "your shell command", "interval_secs": 5, "class": "optional-css-class" }`
   - `interval_secs` defaults to `5` and values below `1` are clamped to `1`
+- `disk`: `{ "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin", "path": "/", "interval_secs": 30, "class": "optional-css-class" }`
+  - `format` defaults to `{free}`
+  - supported placeholders: `{free}`, `{used}`, `{total}`, `{path}`, `{percentage_free}`, `{percentage_used}`
+  - `path` defaults to `/`
+  - `interval_secs` defaults to `30` and values below `1` are clamped to `1`
+  - `click` runs a shell command on left click (`on-click` alias also supported)
 - `tray`: `{ "type": "tray", "icon_size": 16, "poll_interval_secs": 2, "class": "optional-css-class" }`
   - `icon_size` defaults to `16` and values below `8` are clamped
   - `poll_interval_secs` defaults to `2` and values below `1` are clamped
@@ -158,6 +166,7 @@ Suggested selectors:
 - `.menu-button.active`
 - `.menu-button.workspace-active`
 - `.clock`
+- `.disk`
 - `.tray`
 - `.tray-item`
 - `.tray-menu-popover`

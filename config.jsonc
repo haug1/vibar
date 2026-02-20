@@ -8,6 +8,7 @@
     ],
     "right": [
       { "type": "tray", "icon_size": 16, "poll_interval_secs": 2 },
+      { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
       { "type": "clock", "format": "%a %d. %b %H:%M:%S" },
     ],
   },
