@@ -1,11 +1,12 @@
-use std::path::Path;
+use std::env;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
 use glib::ControlFlow;
 use gtk::gdk::{MemoryFormat, MemoryTexture, Texture};
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Button, GestureClick, Image, Orientation, Widget};
+use gtk::{Box as GtkBox, Button, GestureClick, IconLookupFlags, Image, Orientation, Widget};
 use serde_json::Value;
 
 use crate::modules::{ModuleBuildContext, ModuleConfig};
@@ -166,23 +167,34 @@ fn image_for_item(item: &TrayItemSnapshot, icon_size: i32) -> Image {
                 return Image::from_paintable(Some(&texture));
             }
         }
+
+        if icon_path.components().count() > 1 {
+            for base in icon_theme_paths(item.icon_theme_path.as_deref()) {
+                let candidate = base.join(icon_path);
+                let icon_file = gio::File::for_path(candidate);
+                if let Ok(texture) = Texture::from_file(&icon_file) {
+                    return Image::from_paintable(Some(&texture));
+                }
+            }
+        }
     }
 
     if let Some(display) = gtk::gdk::Display::default() {
         let icon_theme = gtk::IconTheme::for_display(&display);
-        if let Some(theme_path) = item.icon_theme_path.as_deref() {
-            let theme_path = Path::new(theme_path);
+        for theme_path in icon_theme_paths(item.icon_theme_path.as_deref()) {
             if !icon_theme
                 .search_path()
                 .iter()
-                .any(|path| path == theme_path)
+                .any(|path| path == &theme_path)
             {
                 icon_theme.add_search_path(theme_path);
             }
         }
 
-        if !item.icon_name.is_empty() && icon_theme.has_icon(&item.icon_name) {
-            return Image::from_icon_name(&item.icon_name);
+        if !item.icon_name.is_empty() {
+            if let Some(image) = image_from_icon_theme(&icon_theme, &item.icon_name, icon_size) {
+                return image;
+            }
         }
     }
 
@@ -197,20 +209,6 @@ fn image_for_item(item: &TrayItemSnapshot, icon_size: i32) -> Image {
     } else {
         &item.icon_name
     };
-    if fallback_name == "image-missing" && tray_debug_enabled() {
-        let pixmap_info = item
-            .icon_pixmap
-            .as_ref()
-            .map(|pixmap| format!("{}x{}", pixmap.width, pixmap.height))
-            .unwrap_or_else(|| "none".to_string());
-        eprintln!(
-            "mybar/tray: icon fallback image-missing id={} icon_name='{}' icon_theme_path='{}' pixmap={}",
-            item.id,
-            item.icon_name,
-            item.icon_theme_path.as_deref().unwrap_or(""),
-            pixmap_info
-        );
-    }
     let image = Image::from_icon_name(fallback_name);
     image.set_pixel_size(icon_size);
     image
@@ -250,10 +248,70 @@ fn image_from_icon_pixmap(pixmap: &TrayIconPixmap) -> Option<Image> {
     Some(Image::from_paintable(Some(&texture)))
 }
 
-fn tray_debug_enabled() -> bool {
-    std::env::var("MYBAR_DEBUG_TRAY")
-        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(false)
+fn icon_theme_paths(raw: Option<&str>) -> Vec<PathBuf> {
+    raw.map(|value| env::split_paths(value).collect())
+        .unwrap_or_default()
+}
+
+fn image_from_icon_theme(
+    icon_theme: &gtk::IconTheme,
+    icon_name: &str,
+    icon_size: i32,
+) -> Option<Image> {
+    let base_name = icon_name.strip_suffix("-symbolic");
+    let mut candidates = vec![icon_name];
+    if let Some(base_name) = base_name {
+        candidates.push(base_name);
+    }
+
+    for candidate in candidates {
+        let flags = if candidate.ends_with("-symbolic") {
+            IconLookupFlags::FORCE_SYMBOLIC
+        } else {
+            IconLookupFlags::empty()
+        };
+
+        let paintable = icon_theme.lookup_icon(
+            candidate,
+            &[],
+            icon_size,
+            1,
+            gtk::TextDirection::None,
+            flags,
+        );
+        let file = paintable.file().and_then(|file| file.path());
+        let looked_up_name = paintable.icon_name();
+        if is_missing_icon_name(looked_up_name.as_ref()) {
+            continue;
+        }
+
+        if candidate.ends_with("-symbolic") && looked_up_name.is_some() {
+            return Some(Image::from_paintable(Some(&paintable)));
+        }
+
+        if let Some(path) = file.as_ref() {
+            let icon_file = gio::File::for_path(path);
+            match Texture::from_file(&icon_file) {
+                Ok(texture) => return Some(Image::from_paintable(Some(&texture))),
+                Err(_) => continue,
+            }
+        }
+
+        if looked_up_name.is_some() {
+            return Some(Image::from_paintable(Some(&paintable)));
+        }
+    }
+
+    None
+}
+
+fn is_missing_icon_name(icon_name: Option<&PathBuf>) -> bool {
+    icon_name
+        .and_then(|path| {
+            path.file_name()
+                .map(|value| value.to_string_lossy().to_string())
+        })
+        .is_some_and(|name| name == "image-missing")
 }
 
 #[cfg(test)]

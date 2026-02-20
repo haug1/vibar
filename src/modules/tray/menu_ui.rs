@@ -1,8 +1,12 @@
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Button, Image, Label, Orientation, Popover, PositionType, Separator};
+use gtk::{
+    Box as GtkBox, Button, IconLookupFlags, Image, Label, Orientation, Popover, PositionType,
+    Separator,
+};
 
 use super::menu_dbus::{fetch_dbus_menu_model, send_menu_event};
 use super::types::{TrayMenuEntry, DEFAULT_ICON_SIZE};
@@ -52,6 +56,59 @@ fn image_from_icon_data(data: &[u8]) -> Option<Image> {
     let image = Image::from_paintable(Some(&texture));
     image.set_pixel_size(DEFAULT_ICON_SIZE);
     Some(image)
+}
+
+fn image_from_icon_name(icon_name: &str) -> Option<Image> {
+    let display = gtk::gdk::Display::default()?;
+
+    let mut themes = vec![gtk::IconTheme::for_display(&display)];
+    for theme_name in ["Adwaita", "hicolor"] {
+        let theme = gtk::IconTheme::new();
+        theme.set_display(Some(&display));
+        theme.set_theme_name(Some(theme_name));
+        themes.push(theme);
+    }
+
+    let mut candidates = vec![icon_name.to_string()];
+    if let Some(base) = icon_name.strip_suffix("-symbolic") {
+        candidates.push(base.to_string());
+    }
+
+    for theme in themes {
+        for candidate in &candidates {
+            let flags = if candidate.ends_with("-symbolic") {
+                IconLookupFlags::FORCE_SYMBOLIC
+            } else {
+                IconLookupFlags::empty()
+            };
+            let paintable = theme.lookup_icon(
+                candidate.as_str(),
+                &[],
+                DEFAULT_ICON_SIZE,
+                1,
+                gtk::TextDirection::None,
+                flags,
+            );
+            if is_missing_icon_name(paintable.icon_name().as_ref()) {
+                continue;
+            }
+
+            let image = Image::from_paintable(Some(&paintable));
+            image.set_pixel_size(DEFAULT_ICON_SIZE);
+            return Some(image);
+        }
+    }
+
+    None
+}
+
+fn is_missing_icon_name(icon_name: Option<&PathBuf>) -> bool {
+    icon_name
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+        })
+        .is_some_and(|name| name == "image-missing")
 }
 
 fn render_menu_level(
@@ -130,14 +187,13 @@ fn render_menu_level(
         button.set_sensitive(entry.enabled);
 
         let row = GtkBox::new(Orientation::Horizontal, 8);
-        if let Some(icon_name) = &entry.icon_name {
-            let icon = Image::from_icon_name(icon_name);
-            icon.set_pixel_size(DEFAULT_ICON_SIZE);
+        if let Some(icon) = entry
+            .icon_name
+            .as_deref()
+            .and_then(image_from_icon_name)
+            .or_else(|| entry.icon_data.as_deref().and_then(image_from_icon_data))
+        {
             row.append(&icon);
-        } else if let Some(icon_data) = &entry.icon_data {
-            if let Some(icon) = image_from_icon_data(icon_data) {
-                row.append(&icon);
-            }
         }
         let label = Label::new(Some(&entry.label));
         label.set_xalign(0.0);

@@ -156,17 +156,19 @@ fn fetch_item(
         )
         .ok()?;
 
-        let icon_name = proxy
+        let icon_name_value = proxy
             .get_property::<String>("IconName")
             .ok()
-            .filter(|value: &String| !value.is_empty())
-            .or_else(|| {
-                proxy
-                    .get_property::<String>("AttentionIconName")
-                    .ok()
-                    .filter(|value: &String| !value.is_empty())
-            })
             .unwrap_or_default();
+        let attention_icon_name_value = proxy
+            .get_property::<String>("AttentionIconName")
+            .ok()
+            .unwrap_or_default();
+        let icon_name = if !icon_name_value.is_empty() {
+            icon_name_value.clone()
+        } else {
+            attention_icon_name_value.clone()
+        };
 
         let icon_pixmap = proxy
             .get_property::<Vec<(i32, i32, Vec<u8>)>>("IconPixmap")
