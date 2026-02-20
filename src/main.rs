@@ -10,7 +10,7 @@ mod style;
 use config::{load_config, Config};
 use modules::{ModuleBuildContext, ModuleConfig};
 
-const APP_ID: &str = "com.example.mybar";
+const APP_ID: &str = "com.example.vibar";
 const CONFIG_PATH: &str = "./config.jsonc";
 
 fn main() {
@@ -55,7 +55,7 @@ fn build_window(
 ) -> ApplicationWindow {
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("mybar")
+        .title("vibar")
         .decorated(false)
         .build();
 

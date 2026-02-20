@@ -27,10 +27,10 @@ This document contains implementation-facing details that are intentionally kept
 
 ## Troubleshooting
 
-- To log sway workspace state each refresh, run with `MYBAR_DEBUG_WORKSPACES=1`.
-  - Example: `MYBAR_DEBUG_WORKSPACES=1 cargo run --locked`
-- To log tray DBus click method calls/errors, run with `MYBAR_DEBUG_TRAY=1`.
-  - Example: `MYBAR_DEBUG_TRAY=1 cargo run --locked`
+- To log sway workspace state each refresh, run with `VIBAR_DEBUG_WORKSPACES=1`.
+  - Example: `VIBAR_DEBUG_WORKSPACES=1 cargo run --locked`
+- To log tray DBus click method calls/errors, run with `VIBAR_DEBUG_TRAY=1`.
+  - Example: `VIBAR_DEBUG_TRAY=1 cargo run --locked`
 
 ## Notes
 

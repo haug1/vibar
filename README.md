@@ -1,4 +1,4 @@
-# mybar
+# vibar
 
 A minimal Wayland taskbar using Rust + GTK4 + `gtk4-layer-shell`.
 

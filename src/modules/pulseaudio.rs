@@ -290,12 +290,12 @@ fn run_native_session(
     let mut proplist =
         Proplist::new().ok_or_else(|| "failed to create pulseaudio proplist".to_string())?;
     proplist
-        .set_str(properties::APPLICATION_NAME, "mybar")
+        .set_str(properties::APPLICATION_NAME, "vibar")
         .map_err(|err| format!("failed to set pulseaudio app name: {err:?}"))?;
 
     let mut mainloop =
         Mainloop::new().ok_or_else(|| "failed to create pulseaudio mainloop".to_string())?;
-    let mut context = Context::new_with_proplist(&mainloop, "mybar-pulseaudio", &proplist)
+    let mut context = Context::new_with_proplist(&mainloop, "vibar-pulseaudio", &proplist)
         .ok_or_else(|| "failed to create pulseaudio context".to_string())?;
 
     context

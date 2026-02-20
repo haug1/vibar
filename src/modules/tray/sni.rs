@@ -42,7 +42,7 @@ fn call_item_methods_with_fallback(
         let Ok(connection) = Connection::session() else {
             if tray_debug_enabled() {
                 eprintln!(
-                    "mybar/tray: no session bus for {destination}{path} methods={}",
+                    "vibar/tray: no session bus for {destination}{path} methods={}",
                     methods.join(",")
                 );
             }
@@ -57,7 +57,7 @@ fn call_item_methods_with_fallback(
         ) else {
             if tray_debug_enabled() {
                 eprintln!(
-                    "mybar/tray: failed proxy for {destination}{path} methods={}",
+                    "vibar/tray: failed proxy for {destination}{path} methods={}",
                     methods.join(",")
                 );
             }
@@ -69,14 +69,14 @@ fn call_item_methods_with_fallback(
             match result {
                 Ok(()) => {
                     if tray_debug_enabled() {
-                        eprintln!("mybar/tray: method ok {destination}{path} {method}({x}, {y})");
+                        eprintln!("vibar/tray: method ok {destination}{path} {method}({x}, {y})");
                     }
                     return;
                 }
                 Err(err) => {
                     if tray_debug_enabled() {
                         eprintln!(
-                            "mybar/tray: method error {destination}{path} {method}({x}, {y}): {err}"
+                            "vibar/tray: method error {destination}{path} {method}({x}, {y}): {err}"
                         );
                     }
                     if !is_method_missing_error(&err) {
@@ -88,7 +88,7 @@ fn call_item_methods_with_fallback(
 
         if tray_debug_enabled() {
             eprintln!(
-                "mybar/tray: no supported click methods for {destination}{path} tried={}",
+                "vibar/tray: no supported click methods for {destination}{path} tried={}",
                 methods.join(",")
             );
         }
@@ -109,7 +109,7 @@ pub(super) fn fetch_tray_snapshot() -> Vec<TrayItemSnapshot> {
         return Vec::new();
     };
 
-    let host_name = format!("mybar-{}", std::process::id());
+    let host_name = format!("vibar-{}", std::process::id());
     let _register_result: ZbusResult<()> =
         watcher.call("RegisterStatusNotifierHost", &(host_name.as_str(),));
 
@@ -228,7 +228,7 @@ fn select_icon_pixmap(entries: Vec<(i32, i32, Vec<u8>)>) -> Option<TrayIconPixma
 }
 
 fn tray_debug_enabled() -> bool {
-    std::env::var("MYBAR_DEBUG_TRAY")
+    std::env::var("VIBAR_DEBUG_TRAY")
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(false)
 }

@@ -4,7 +4,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 
 ## Project Snapshot
 
-- Name: `mybar`
+- Name: `vibar`
 - Goal: minimal Wayland taskbar app (Rust + GTK4 + `gtk4-layer-shell`)
 - Current status: project passes CI (`make ci`)
 - Primary runtime target: sway/Wayland

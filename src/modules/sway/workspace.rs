@@ -54,13 +54,13 @@ pub(crate) fn build_workspaces_module(output_filter: Option<String>) -> GtkBox {
     let (mut signal_rx, signal_tx) = match std::os::unix::net::UnixStream::pair() {
         Ok(pair) => pair,
         Err(err) => {
-            eprintln!("mybar/workspaces: failed to create event signal pipe: {err}");
+            eprintln!("vibar/workspaces: failed to create event signal pipe: {err}");
             refresh_workspaces(&container, output_filter.as_deref());
             return container;
         }
     };
     if let Err(err) = signal_rx.set_nonblocking(true) {
-        eprintln!("mybar/workspaces: failed to set nonblocking event signal pipe: {err}");
+        eprintln!("vibar/workspaces: failed to set nonblocking event signal pipe: {err}");
         refresh_workspaces(&container, output_filter.as_deref());
         return container;
     }
@@ -78,7 +78,7 @@ pub(crate) fn build_workspaces_module(output_filter: Option<String>) -> GtkBox {
             move |_, condition| {
                 if condition.intersects(glib::IOCondition::HUP | glib::IOCondition::ERR) {
                     if workspace_debug_enabled() {
-                        eprintln!("mybar/workspaces: event signal pipe closed");
+                        eprintln!("vibar/workspaces: event signal pipe closed");
                     }
                     return ControlFlow::Break;
                 }
@@ -89,14 +89,14 @@ pub(crate) fn build_workspaces_module(output_filter: Option<String>) -> GtkBox {
                     match signal_rx.read(&mut buf) {
                         Ok(0) => {
                             if workspace_debug_enabled() {
-                                eprintln!("mybar/workspaces: event signal pipe reached EOF");
+                                eprintln!("vibar/workspaces: event signal pipe reached EOF");
                             }
                             return ControlFlow::Break;
                         }
                         Ok(_) => had_event = true,
                         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => break,
                         Err(err) => {
-                            eprintln!("mybar/workspaces: failed to read event signal pipe: {err}");
+                            eprintln!("vibar/workspaces: failed to read event signal pipe: {err}");
                             return ControlFlow::Break;
                         }
                     }
@@ -119,7 +119,7 @@ fn start_workspace_event_listener(mut signal_tx: std::os::unix::net::UnixStream)
             Ok(conn) => conn,
             Err(err) => {
                 if workspace_debug_enabled() {
-                    eprintln!("mybar/workspaces: failed to connect for events: {err}");
+                    eprintln!("vibar/workspaces: failed to connect for events: {err}");
                 }
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 continue;
@@ -130,7 +130,7 @@ fn start_workspace_event_listener(mut signal_tx: std::os::unix::net::UnixStream)
             Ok(stream) => stream,
             Err(err) => {
                 if workspace_debug_enabled() {
-                    eprintln!("mybar/workspaces: failed to subscribe to events: {err}");
+                    eprintln!("vibar/workspaces: failed to subscribe to events: {err}");
                 }
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 continue;
@@ -139,7 +139,7 @@ fn start_workspace_event_listener(mut signal_tx: std::os::unix::net::UnixStream)
 
         for event in stream {
             if workspace_debug_enabled() {
-                eprintln!("mybar/workspaces: event={event:?}");
+                eprintln!("vibar/workspaces: event={event:?}");
             }
             if signal_tx.write_all(&[1]).is_err() {
                 return;
@@ -147,7 +147,7 @@ fn start_workspace_event_listener(mut signal_tx: std::os::unix::net::UnixStream)
         }
 
         if workspace_debug_enabled() {
-            eprintln!("mybar/workspaces: event stream ended, reconnecting");
+            eprintln!("vibar/workspaces: event stream ended, reconnecting");
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     });
@@ -195,7 +195,7 @@ fn refresh_workspaces(container: &GtkBox, output_filter: Option<&str>) {
 
     if workspace_debug_enabled() {
         eprintln!(
-            "mybar/workspaces: output_filter={:?} focused(tree)={:?} focused(list)={:?} all=[{}]",
+            "vibar/workspaces: output_filter={:?} focused(tree)={:?} focused(list)={:?} all=[{}]",
             output_filter,
             focused_workspace_from_tree,
             focused_workspace_from_list,
@@ -274,7 +274,7 @@ fn focused_workspace_name_in_node_with_context(
 }
 
 fn workspace_debug_enabled() -> bool {
-    std::env::var("MYBAR_DEBUG_WORKSPACES")
+    std::env::var("VIBAR_DEBUG_WORKSPACES")
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(false)
 }

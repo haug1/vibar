@@ -4,7 +4,7 @@ Instructions for coding agents working in this repository.
 
 ## Purpose
 
-- Project: `mybar`
+- Project: `vibar`
 - Scope: minimal Wayland taskbar in Rust using GTK4 + `gtk4-layer-shell`
 - Principle: keep changes incremental, predictable, and reproducible
 
