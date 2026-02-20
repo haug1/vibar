@@ -8,6 +8,10 @@ Top-level config uses three layout areas:
 
 ```jsonc
 {
+  "style": {
+    "load-default": true,
+    "path": "~/.config/vibar/style.css"
+  },
   "areas": {
     "left": [{ "type": "workspaces" }],
     "center": [{ "type": "exec", "command": "echo center" }],
@@ -25,7 +29,15 @@ Each entry in an area is a module object with a required `"type"` key.
 
 ## Styling Overview
 
-`style.css` is loaded by default. Common layout selectors:
+CSS loading behavior:
+
+- Embedded `style.css` is loaded by default.
+- Optional user CSS file can be loaded via top-level `style.path`.
+- User CSS is loaded after default CSS, so it can override default rules.
+- Set top-level `style.load-default` to `false` to disable embedded default CSS.
+- Relative `style.path` values resolve from the selected config file directory.
+
+Common layout selectors:
 
 - `.bar`
 - `.left`

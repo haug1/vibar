@@ -1,5 +1,16 @@
 {
-  // Optional. Remove this file to use built-in defaults.
+  // App searches config in this order:
+  // 1) ~/.config/vibar/config.jsonc
+  // 2) ./config.jsonc
+  // If neither exists (or both are invalid), built-in defaults are used.
+  "style": {
+    // Optional. Defaults to true.
+    // Set false to disable embedded default style.css.
+    "load-default": true,
+    // Optional. User CSS loaded after default CSS (if enabled), so it can override.
+    // Relative paths are resolved from this config file's directory.
+    // "path": "~/.config/vibar/style.css"
+  },
   "areas": {
     "left": [{ "type": "workspaces" }],
     "center": [

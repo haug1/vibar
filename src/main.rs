@@ -11,24 +11,26 @@ use config::{load_config, Config};
 use modules::{ModuleBuildContext, ModuleConfig};
 
 const APP_ID: &str = "com.example.vibar";
-const CONFIG_PATH: &str = "./config.jsonc";
 
 fn main() {
     let app = Application::builder().application_id(APP_ID).build();
 
     app.connect_activate(|app| {
-        let config = load_config(CONFIG_PATH);
-        style::load_default_css();
+        let loaded_config = load_config();
+        style::load_styles(
+            &loaded_config.config.style,
+            loaded_config.source_path.as_deref(),
+        );
 
         let monitors = connected_monitors();
         if monitors.is_empty() {
-            let window = build_window(app, &config, None);
+            let window = build_window(app, &loaded_config.config, None);
             window.present();
             return;
         }
 
         for monitor in monitors {
-            let window = build_window(app, &config, Some(&monitor));
+            let window = build_window(app, &loaded_config.config, Some(&monitor));
             window.present();
         }
     });

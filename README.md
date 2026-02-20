@@ -50,12 +50,28 @@ make ci
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system
 - Native PulseAudio module with event-driven updates and scroll-step volume control
-- Default styling loaded from repo `style.css` (embedded at build time)
-  - translucent base theme with hover states for clickable UI elements
+- Config file search order:
+  - `~/.config/vibar/config.jsonc`
+  - `./config.jsonc` (fallback)
+- CSS layering support:
+  - embedded default `style.css`
+  - optional user CSS loaded on top
+  - default CSS can be disabled via config flag
 
 ## Configuration And Styling
 
-By default the app reads `./config.jsonc` if it exists. If it is missing or invalid, built-in defaults are used.
+Config is loaded in this order:
+
+1. `~/.config/vibar/config.jsonc`
+2. `./config.jsonc`
+
+If no candidate exists (or both are invalid), built-in defaults are used.
+
+Styling config supports:
+
+- loading embedded default `style.css` (`style.load-default`, default `true`)
+- loading a user CSS file (`style.path`) after default CSS for overrides
+- disabling embedded defaults and using only user CSS
 
 - Default example config: [`config.jsonc`](./config.jsonc)
 - Full module configuration and module-specific styling selectors:
