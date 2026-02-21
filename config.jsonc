@@ -13,14 +13,16 @@
   },
   "areas": {
     "left": [{ "type": "workspaces" }],
-    "center": [
-      // interval_secs defaults to 5 and minimum is 1
-      { "type": "exec", "command": "echo $RANDOM", "interval_secs": 5 },
-    ],
+    "center": [],
     "right": [
       { "type": "pulseaudio", "click": "pavucontrol" },
-      { "type": "tray", "icon_size": 16, "poll_interval_secs": 2 },
-      { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
+      { "type": "disk", "format": "{free} \uf0a0 ", "click": "xdg-open $HOME" },
+      {
+        "type": "group",
+        "class": "tray-group",
+        "drawer": true,
+        "modules": [{ "type": "tray", "icon_size": 16, "poll_interval_secs": 2 }],
+      },
       { "type": "clock", "format": "%a %d. %b %H:%M:%S" },
     ],
   },

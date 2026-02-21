@@ -14,6 +14,7 @@ This document contains implementation-facing details that are intentionally kept
   - config parsing from raw map
   - widget initialization
 - `modules::build_module(...)` finds the registered factory by module type and initializes it.
+- `group` is a composite module that recursively calls `build_module(...)` for child entries.
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`.
 - Config loading prefers `~/.config/vibar/config.jsonc`, then falls back to `./config.jsonc`.
 - Top-level style config supports layered CSS (`style.load-default` + `style.path`).
@@ -24,8 +25,9 @@ This document contains implementation-facing details that are intentionally kept
 2. Add a `MODULE_TYPE` constant and typed config struct in that file.
 3. Implement `ModuleFactory` for that module's factory.
 4. Register the factory in `src/modules/mod.rs` `FACTORIES`.
-5. Add a `default_module_config()` helper if it should appear in built-in defaults.
-6. Update docs/example config and run `make ci`.
+5. For composite behavior, follow `src/modules/group.rs` (child module parsing + recursive build).
+6. Add a `default_module_config()` helper if it should appear in built-in defaults.
+7. Update docs/example config and run `make ci`.
 
 ## Troubleshooting
 

@@ -89,6 +89,27 @@
   opacity: 1;
 }
 
+.group-toggle {
+  padding: 0;
+}
+
+.group-toggle > button {
+  background: rgba(146, 177, 222, 0.12);
+  border: 1px solid rgba(176, 206, 245, 0.22);
+  border-radius: 8px;
+  color: #dce5f6;
+  opacity: 0.88;
+  padding: 2px 8px;
+}
+
+.group-toggle > button:hover,
+.group-toggle > button:checked {
+  background: rgba(121, 182, 255, 0.24);
+  border-color: rgba(156, 214, 255, 0.54);
+  color: #f8fbff;
+  opacity: 1;
+}
+
 .clock,
 .exec {
   color: #e6eefb;

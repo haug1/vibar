@@ -49,6 +49,7 @@ make ci
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system
+- Group module for logical submodule grouping and optional drawer-style expansion
 - Native PulseAudio module with event-driven updates and scroll-step volume control
 - Config file search order:
   - `~/.config/vibar/config.jsonc`

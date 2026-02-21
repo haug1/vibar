@@ -16,8 +16,12 @@ Top-level config uses three layout areas:
     "left": [{ "type": "workspaces" }],
     "center": [{ "type": "exec", "command": "echo center" }],
     "right": [
-      { "type": "pulseaudio" },
-      { "type": "tray" },
+      {
+        "type": "group",
+        "class": "media-group",
+        "drawer": true,
+        "modules": [{ "type": "pulseaudio" }, { "type": "tray" }]
+      },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
       { "type": "clock" }
     ]
@@ -45,6 +49,60 @@ Common layout selectors:
 - `.right`
 - `.module` (base module label styling and default opacity)
 - `.module.clickable` (applied when a label-backed module has click actions)
+
+## `group`
+
+Schema:
+
+```json
+{
+  "type": "group",
+  "class": "optional-css-class",
+  "spacing": 6,
+  "modules": [{ "type": "pulseaudio" }, { "type": "tray" }],
+  "drawer": {
+    "label-closed": "",
+    "label-open": "",
+    "start-open": false
+  }
+}
+```
+
+Fields:
+
+- `modules` (required): child modules rendered inside the group.
+- `children` (optional alias): alias for `modules`.
+- `class` (optional): extra CSS class on the group container.
+- `spacing` (optional): spacing in px between child modules.
+  - Default: `6`
+  - Minimum: `0` (values below are clamped)
+- `drawer` (optional): if set, child modules render inside a revealable drawer.
+  - `true`: enable drawer with defaults.
+  - object form supports:
+    - `label-closed` / `label_closed` (optional): toggle label when collapsed.
+      - Default: ``
+    - `label-open` / `label_open` (optional): toggle label when expanded.
+      - Default: ``
+    - `start-open` / `start_open` (optional): initial drawer state.
+      - Default: `false`
+
+Behavior:
+
+- Logical grouping container for submodules.
+- Group container can be styled as one unit while preserving child module behavior.
+- With `drawer` enabled, child modules are shown in a popover positioned above the bar toggle (context-menu style).
+- Drawer popover content is vertical.
+- Child module initialization errors include the failing child index.
+- Group modules can be nested.
+
+Styling:
+
+- Group container classes: `.module.group`
+- Drawer-enabled group class: `.group-drawer`
+- Drawer toggle button class: `.group-toggle`
+- Drawer popover class: `.group-popover`
+- Child row container class: `.group-content`
+- Optional extra class via `class` field.
 
 ## `workspaces`
 

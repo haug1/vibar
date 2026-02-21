@@ -16,6 +16,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Non-focusable bar windows (`KeyboardMode::None`, no focus-on-click)
 - 3 layout areas: `left`, `center`, `right`
 - Config-driven modules (current set documented in `docs/modules.md`)
+- Group module supports nested modules for shared styling and optional drawer reveal behavior
 - Config lookup order: `~/.config/vibar/config.jsonc` then `./config.jsonc`
 - Workspace module is output-local per monitor and event-driven via sway IPC
 - Clock module supports optional `click` / `on-click` shell actions
