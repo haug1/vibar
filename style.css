@@ -118,6 +118,11 @@
   opacity: 0.95;
 }
 
+.cpu.usage-high,
+.cpu.usage-critical {
+  background: rgba(255, 84, 84, 0.25);
+}
+
 .tray {
 }
 

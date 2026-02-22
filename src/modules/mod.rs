@@ -1,4 +1,5 @@
 pub(crate) mod clock;
+pub(crate) mod cpu;
 pub(crate) mod disk;
 pub(crate) mod exec;
 pub(crate) mod group;
@@ -41,6 +42,7 @@ pub(crate) trait ModuleFactory {
 
 const FACTORIES: &[&dyn ModuleFactory] = &[
     &exec::FACTORY,
+    &cpu::FACTORY,
     &disk::FACTORY,
     &memory::FACTORY,
     &group::FACTORY,

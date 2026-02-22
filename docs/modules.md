@@ -23,7 +23,7 @@ Top-level config uses three layout areas:
         "modules": [{ "type": "pulseaudio" }, { "type": "tray" }]
       },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
-      { "type": "memory", "format": "{used_percentage} \uf2db " },
+      { "type": "cpu", "format": "{used_percentage}% ", "interval_secs": 1 },
       { "type": "clock" }
     ]
   }
@@ -284,6 +284,54 @@ Behavior:
 Styling:
 
 - Label classes: `.module.memory`
+- Click-enabled labels also include: `.clickable`
+- Optional extra class via `class` field.
+
+## `cpu`
+
+Schema:
+
+```json
+{
+  "type": "cpu",
+  "format": "{used_percentage}% ",
+  "click": "optional shell command",
+  "interval_secs": 5,
+  "class": "optional-css-classes"
+}
+```
+
+Fields:
+
+- `format` (optional): output format template.
+  - Default: `{used_percentage}%`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
+- `interval_secs` (optional): polling interval in seconds.
+  - Default: `5`
+  - Minimum: `1` (values below are clamped)
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+
+Format placeholders:
+
+- `{used_percentage}`
+- `{idle_percentage}`
+
+Behavior:
+
+- Polls `/proc/stat` and reads aggregate CPU counters from `cpu` line.
+- Uses deltas between samples to compute usage percentage.
+- Adds usage-state CSS class on each update:
+  - `usage-low` for `< 30%`
+  - `usage-medium` for `30-59%`
+  - `usage-high` for `60-84%`
+  - `usage-critical` for `>= 85%`
+  - `usage-unknown` when sampling fails
+
+Styling:
+
+- Label classes: `.module.cpu`
+- Dynamic usage classes: `.usage-low`, `.usage-medium`, `.usage-high`, `.usage-critical`, `.usage-unknown`
 - Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 

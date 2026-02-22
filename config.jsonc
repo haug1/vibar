@@ -17,6 +17,7 @@
     "right": [
       { "type": "pulseaudio", "click": "pavucontrol" },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "xdg-open $HOME" },
+      { "type": "cpu", "format": "{used_percentage}% ", "interval_secs": 1 },
       { "type": "memory", "format": "{used_percentage}% \uf2db " },
       {
         "type": "group",
