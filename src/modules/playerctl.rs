@@ -1,4 +1,5 @@
-use std::process::Command;
+use std::collections::HashMap;
+use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
 use glib::ControlFlow;
@@ -6,6 +7,11 @@ use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
+use zbus::blocking::fdo::DBusProxy;
+use zbus::blocking::{Connection, MessageIterator, Proxy};
+use zbus::message::Type as MessageType;
+use zbus::zvariant::OwnedValue;
+use zbus::MatchRule;
 
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
@@ -13,11 +19,14 @@ use crate::modules::{
 
 use super::ModuleFactory;
 
-const MIN_PLAYERCTL_INTERVAL_SECS: u32 = 1;
 const DEFAULT_PLAYERCTL_INTERVAL_SECS: u32 = 1;
 const DEFAULT_PLAYERCTL_FORMAT: &str = "{status_icon} {title}";
 const DEFAULT_NO_PLAYER_TEXT: &str = "No media";
-const METADATA_FORMAT: &str = "{{status}}\t{{playerName}}\t{{artist}}\t{{album}}\t{{title}}";
+const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
+const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
+const MPRIS_PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
+const MPRIS_ROOT_INTERFACE: &str = "org.mpris.MediaPlayer2";
+const DBUS_PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
 pub(crate) const MODULE_TYPE: &str = "playerctl";
 
 #[derive(Debug, Deserialize, Clone)]
@@ -28,6 +37,7 @@ pub(crate) struct PlayerctlConfig {
     pub(crate) click: Option<String>,
     #[serde(rename = "on-click", default)]
     pub(crate) on_click: Option<String>,
+    // Kept for backward-compatibility with existing configs.
     #[serde(default = "default_playerctl_interval")]
     pub(crate) interval_secs: u32,
     #[serde(default)]
@@ -38,7 +48,7 @@ pub(crate) struct PlayerctlConfig {
     pub(crate) no_player_text: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PlayerctlMetadata {
     status: String,
     status_icon: &'static str,
@@ -46,6 +56,20 @@ struct PlayerctlMetadata {
     artist: String,
     album: String,
     title: String,
+    position_micros: Option<i64>,
+    length_micros: Option<i64>,
+    can_go_previous: bool,
+    can_go_next: bool,
+    can_play: bool,
+    can_pause: bool,
+    can_seek: bool,
+    bus_name: String,
+}
+
+#[derive(Debug, Clone)]
+enum BackendUpdate {
+    Snapshot(Option<PlayerctlMetadata>),
+    Error(String),
 }
 
 pub(crate) struct PlayerctlFactory;
@@ -96,10 +120,6 @@ pub(crate) fn parse_config(module: &ModuleConfig) -> Result<PlayerctlConfig, Str
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-pub(crate) fn normalized_playerctl_interval(interval_secs: u32) -> u32 {
-    interval_secs.max(MIN_PLAYERCTL_INTERVAL_SECS)
-}
-
 pub(crate) fn build_playerctl_module(
     format: String,
     click_command: Option<String>,
@@ -115,29 +135,25 @@ pub(crate) fn build_playerctl_module(
     apply_css_classes(&label, class.as_deref());
     attach_primary_click_command(&label, click_command);
 
-    let effective_interval_secs = normalized_playerctl_interval(interval_secs);
-    if effective_interval_secs != interval_secs {
+    if interval_secs != DEFAULT_PLAYERCTL_INTERVAL_SECS {
         eprintln!(
-            "playerctl interval_secs={} is too low; clamping to {} second",
-            interval_secs, effective_interval_secs
+            "playerctl interval_secs={} is ignored in event-driven mode",
+            interval_secs
         );
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<String>();
-    std::thread::spawn(move || loop {
-        let text = match read_playerctl_metadata(player.as_deref()) {
-            Ok(Some(metadata)) => render_format(&format, &metadata),
-            Ok(None) => no_player_text.clone(),
-            Err(err) => format!("playerctl error: {err}"),
-        };
-        let _ = sender.send(text);
-        std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
-    });
+    let (sender, receiver) = mpsc::channel::<BackendUpdate>();
+    std::thread::spawn(move || run_event_backend(sender, player));
 
     glib::timeout_add_local(Duration::from_millis(200), {
         let label = label.clone();
         move || {
-            while let Ok(text) = receiver.try_recv() {
+            while let Ok(update) = receiver.try_recv() {
+                let text = match update {
+                    BackendUpdate::Snapshot(Some(metadata)) => render_format(&format, &metadata),
+                    BackendUpdate::Snapshot(None) => no_player_text.clone(),
+                    BackendUpdate::Error(err) => format!("playerctl error: {err}"),
+                };
                 label.set_text(&text);
             }
             ControlFlow::Continue
@@ -147,64 +163,230 @@ pub(crate) fn build_playerctl_module(
     label
 }
 
-fn read_playerctl_metadata(player: Option<&str>) -> Result<Option<PlayerctlMetadata>, String> {
-    let mut command = Command::new("playerctl");
-    if let Some(player_name) = player {
-        command.arg("--player").arg(player_name);
+fn run_event_backend(ui_sender: Sender<BackendUpdate>, player_filter: Option<String>) {
+    let (trigger_tx, trigger_rx) = mpsc::channel::<()>();
+
+    start_name_owner_listener(trigger_tx.clone());
+    start_properties_listener(trigger_tx);
+
+    // Prime with one initial snapshot.
+    publish_snapshot(&ui_sender, player_filter.as_deref());
+
+    while trigger_rx.recv().is_ok() {
+        publish_snapshot(&ui_sender, player_filter.as_deref());
     }
-    let output = command
-        .arg("metadata")
-        .arg("--format")
-        .arg(METADATA_FORMAT)
-        .output()
-        .map_err(|err| format!("failed to run playerctl: {err}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if is_no_players_error(&stderr) {
-            return Ok(None);
-        }
-
-        let stderr = stderr.trim();
-        return Err(if stderr.is_empty() {
-            format!("playerctl exited with status {}", output.status)
-        } else {
-            format!("playerctl failed: {stderr}")
-        });
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_playerctl_output(&stdout).map(Some)
 }
 
-fn parse_playerctl_output(output: &str) -> Result<PlayerctlMetadata, String> {
-    let line = output
-        .lines()
-        .next()
-        .ok_or_else(|| "missing playerctl metadata output".to_string())?;
-    let mut fields = line.splitn(5, '\t');
+fn publish_snapshot(ui_sender: &Sender<BackendUpdate>, player_filter: Option<&str>) {
+    let update = match query_active_player_metadata(player_filter) {
+        Ok(snapshot) => BackendUpdate::Snapshot(snapshot),
+        Err(err) => BackendUpdate::Error(err),
+    };
 
-    let status_raw = fields.next().unwrap_or_default();
-    let player = fields.next().unwrap_or_default().to_string();
-    let artist = fields.next().unwrap_or_default().to_string();
-    let album = fields.next().unwrap_or_default().to_string();
-    let title = fields.next().unwrap_or_default().to_string();
+    let _ = ui_sender.send(update);
+}
 
-    if status_raw.is_empty() {
-        return Err("missing player status from playerctl output".to_string());
+fn start_name_owner_listener(trigger_tx: Sender<()>) {
+    std::thread::spawn(move || {
+        let Ok(connection) = Connection::session() else {
+            eprintln!("playerctl: failed to open session bus for NameOwnerChanged listener");
+            return;
+        };
+        let Ok(proxy) = DBusProxy::new(&connection) else {
+            eprintln!("playerctl: failed to create DBus proxy for NameOwnerChanged listener");
+            return;
+        };
+        let Ok(mut signals) = proxy.receive_name_owner_changed() else {
+            eprintln!("playerctl: failed to subscribe to NameOwnerChanged");
+            return;
+        };
+
+        for signal in &mut signals {
+            if name_owner_changed_is_mpris(&signal) {
+                let _ = trigger_tx.send(());
+            }
+        }
+    });
+}
+
+fn start_properties_listener(trigger_tx: Sender<()>) {
+    std::thread::spawn(move || {
+        let Ok(connection) = Connection::session() else {
+            eprintln!("playerctl: failed to open session bus for PropertiesChanged listener");
+            return;
+        };
+
+        let rule = match MatchRule::builder()
+            .msg_type(MessageType::Signal)
+            .interface(DBUS_PROPERTIES_INTERFACE)
+            .and_then(|builder| builder.member("PropertiesChanged"))
+            .and_then(|builder| builder.path(MPRIS_PATH))
+            .map(|builder| builder.build())
+        {
+            Ok(rule) => rule,
+            Err(err) => {
+                eprintln!("playerctl: failed to build PropertiesChanged match rule: {err}");
+                return;
+            }
+        };
+
+        let Ok(iterator) = MessageIterator::for_match_rule(rule, &connection, Some(256)) else {
+            eprintln!("playerctl: failed to subscribe to PropertiesChanged");
+            return;
+        };
+
+        for message in iterator {
+            let Ok(message) = message else {
+                continue;
+            };
+
+            if is_mpris_properties_changed(&message) {
+                let _ = trigger_tx.send(());
+            }
+        }
+    });
+}
+
+fn is_mpris_properties_changed(message: &zbus::Message) -> bool {
+    let Ok((interface_name, _, _)) =
+        message
+            .body()
+            .deserialize::<(String, HashMap<String, OwnedValue>, Vec<String>)>()
+    else {
+        return false;
+    };
+
+    interface_name == MPRIS_PLAYER_INTERFACE || interface_name == MPRIS_ROOT_INTERFACE
+}
+
+fn name_owner_changed_is_mpris(signal: &zbus::blocking::fdo::NameOwnerChanged) -> bool {
+    signal
+        .args()
+        .ok()
+        .map(|args| args.name().starts_with(MPRIS_PREFIX))
+        .unwrap_or(false)
+}
+
+fn query_active_player_metadata(
+    player_filter: Option<&str>,
+) -> Result<Option<PlayerctlMetadata>, String> {
+    let connection =
+        Connection::session().map_err(|err| format!("failed to connect to D-Bus: {err}"))?;
+    let proxy =
+        DBusProxy::new(&connection).map_err(|err| format!("failed to create DBus proxy: {err}"))?;
+    let names = proxy
+        .list_names()
+        .map_err(|err| format!("failed to list D-Bus names: {err}"))?;
+
+    let mut players = names
+        .into_iter()
+        .map(|name| name.to_string())
+        .filter(|name| name.starts_with(MPRIS_PREFIX))
+        .collect::<Vec<_>>();
+    players.sort();
+
+    if let Some(filter) = player_filter {
+        players.retain(|name| matches_player_filter(name, filter));
     }
 
-    let status = status_raw.to_ascii_lowercase();
-    let status_icon = status_icon_for(&status);
+    if players.is_empty() {
+        return Ok(None);
+    }
+
+    let mut candidates = Vec::new();
+    for bus_name in players {
+        if let Ok(metadata) = read_player_metadata(&connection, &bus_name) {
+            candidates.push(metadata);
+        }
+    }
+
+    Ok(select_active_player(candidates))
+}
+
+fn read_player_metadata(
+    connection: &Connection,
+    bus_name: &str,
+) -> Result<PlayerctlMetadata, String> {
+    let player_proxy = Proxy::new(connection, bus_name, MPRIS_PATH, MPRIS_PLAYER_INTERFACE)
+        .map_err(|err| format!("failed to create player proxy for {bus_name}: {err}"))?;
+    let root_proxy = Proxy::new(connection, bus_name, MPRIS_PATH, MPRIS_ROOT_INTERFACE)
+        .map_err(|err| format!("failed to create root proxy for {bus_name}: {err}"))?;
+
+    let status = player_proxy
+        .get_property::<String>("PlaybackStatus")
+        .map(|raw| normalize_status(raw.as_str()))
+        .map_err(|err| format!("failed to read PlaybackStatus for {bus_name}: {err}"))?;
+    let metadata = player_proxy
+        .get_property::<HashMap<String, OwnedValue>>("Metadata")
+        .unwrap_or_default();
+
+    let player = root_proxy
+        .get_property::<String>("Identity")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| short_player_name(bus_name));
 
     Ok(PlayerctlMetadata {
+        status_icon: status_icon_for(&status),
         status,
-        status_icon,
         player,
-        artist,
-        album,
-        title,
+        artist: metadata_artist(&metadata).unwrap_or_default(),
+        album: metadata_string(&metadata, "xesam:album").unwrap_or_default(),
+        title: metadata_string(&metadata, "xesam:title").unwrap_or_default(),
+        position_micros: player_proxy.get_property::<i64>("Position").ok(),
+        length_micros: metadata_i64(&metadata, "mpris:length"),
+        can_go_previous: player_proxy
+            .get_property::<bool>("CanGoPrevious")
+            .unwrap_or(false),
+        can_go_next: player_proxy
+            .get_property::<bool>("CanGoNext")
+            .unwrap_or(false),
+        can_play: player_proxy
+            .get_property::<bool>("CanPlay")
+            .unwrap_or(false),
+        can_pause: player_proxy
+            .get_property::<bool>("CanPause")
+            .unwrap_or(false),
+        can_seek: player_proxy
+            .get_property::<bool>("CanSeek")
+            .unwrap_or(false),
+        bus_name: bus_name.to_string(),
     })
+}
+
+fn select_active_player(candidates: Vec<PlayerctlMetadata>) -> Option<PlayerctlMetadata> {
+    candidates.into_iter().min_by(|a, b| {
+        active_rank(&a.status)
+            .cmp(&active_rank(&b.status))
+            .then(a.bus_name.cmp(&b.bus_name))
+    })
+}
+
+fn active_rank(status: &str) -> u8 {
+    match status {
+        "playing" => 0,
+        "paused" => 1,
+        "stopped" => 2,
+        _ => 3,
+    }
+}
+
+fn matches_player_filter(bus_name: &str, filter: &str) -> bool {
+    bus_name == filter
+        || bus_name
+            .strip_prefix(MPRIS_PREFIX)
+            .is_some_and(|short_name| short_name == filter)
+}
+
+fn short_player_name(bus_name: &str) -> String {
+    bus_name
+        .strip_prefix(MPRIS_PREFIX)
+        .unwrap_or(bus_name)
+        .to_string()
+}
+
+fn normalize_status(status: &str) -> String {
+    status.to_ascii_lowercase()
 }
 
 fn status_icon_for(status: &str) -> &'static str {
@@ -216,10 +398,45 @@ fn status_icon_for(status: &str) -> &'static str {
     }
 }
 
-fn is_no_players_error(stderr: &str) -> bool {
-    let normalized = stderr.to_ascii_lowercase();
-    normalized.contains("no players found")
-        || normalized.contains("no player could handle this command")
+fn metadata_string(metadata: &HashMap<String, OwnedValue>, key: &str) -> Option<String> {
+    metadata
+        .get(key)
+        .and_then(|value| value.try_clone().ok())
+        .and_then(|value| String::try_from(value).ok())
+        .filter(|value| !value.is_empty())
+}
+
+fn metadata_artist(metadata: &HashMap<String, OwnedValue>) -> Option<String> {
+    let value = metadata.get("xesam:artist")?.try_clone().ok()?;
+
+    if let Ok(artists) = Vec::<String>::try_from(value.try_clone().ok()?) {
+        let joined = artists
+            .into_iter()
+            .filter(|artist| !artist.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if !joined.is_empty() {
+            return Some(joined);
+        }
+    }
+
+    String::try_from(value)
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
+fn metadata_i64(metadata: &HashMap<String, OwnedValue>, key: &str) -> Option<i64> {
+    let value = metadata.get(key)?.try_clone().ok()?;
+
+    i64::try_from(value.try_clone().ok()?)
+        .ok()
+        .or_else(|| i32::try_from(value.try_clone().ok()?).ok().map(i64::from))
+        .or_else(|| {
+            u64::try_from(value.try_clone().ok()?)
+                .ok()
+                .and_then(|v| i64::try_from(v).ok())
+        })
+        .or_else(|| u32::try_from(value).ok().map(i64::from))
 }
 
 fn render_format(format: &str, metadata: &PlayerctlMetadata) -> String {
@@ -246,30 +463,61 @@ mod tests {
     }
 
     #[test]
-    fn normalized_playerctl_interval_enforces_lower_bound() {
-        assert_eq!(normalized_playerctl_interval(0), 1);
-        assert_eq!(normalized_playerctl_interval(1), 1);
-        assert_eq!(normalized_playerctl_interval(10), 10);
+    fn matches_player_filter_accepts_full_and_short_names() {
+        assert!(matches_player_filter(
+            "org.mpris.MediaPlayer2.spotify",
+            "org.mpris.MediaPlayer2.spotify"
+        ));
+        assert!(matches_player_filter(
+            "org.mpris.MediaPlayer2.spotify",
+            "spotify"
+        ));
+        assert!(!matches_player_filter(
+            "org.mpris.MediaPlayer2.spotify",
+            "mpv"
+        ));
     }
 
     #[test]
-    fn parse_playerctl_output_parses_metadata() {
-        let metadata = parse_playerctl_output("Playing\tspotify\tArtist\tAlbum\tSong")
-            .expect("playerctl output should parse");
+    fn select_active_player_prefers_playing_then_name() {
+        let chosen = select_active_player(vec![
+            PlayerctlMetadata {
+                status: "paused".to_string(),
+                status_icon: "",
+                player: "vlc".to_string(),
+                artist: String::new(),
+                album: String::new(),
+                title: String::new(),
+                position_micros: None,
+                length_micros: None,
+                can_go_previous: false,
+                can_go_next: false,
+                can_play: false,
+                can_pause: false,
+                can_seek: false,
+                bus_name: "org.mpris.MediaPlayer2.vlc".to_string(),
+            },
+            PlayerctlMetadata {
+                status: "playing".to_string(),
+                status_icon: "",
+                player: "spotify".to_string(),
+                artist: String::new(),
+                album: String::new(),
+                title: String::new(),
+                position_micros: None,
+                length_micros: None,
+                can_go_previous: false,
+                can_go_next: false,
+                can_play: false,
+                can_pause: false,
+                can_seek: false,
+                bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
+            },
+        ])
+        .expect("one player should be selected");
 
-        assert_eq!(metadata.status, "playing");
-        assert_eq!(metadata.status_icon, "");
-        assert_eq!(metadata.player, "spotify");
-        assert_eq!(metadata.artist, "Artist");
-        assert_eq!(metadata.album, "Album");
-        assert_eq!(metadata.title, "Song");
-    }
-
-    #[test]
-    fn is_no_players_error_matches_known_messages() {
-        assert!(is_no_players_error("No players found"));
-        assert!(is_no_players_error("No player could handle this command"));
-        assert!(!is_no_players_error("some other failure"));
+        assert_eq!(chosen.status, "playing");
+        assert_eq!(chosen.bus_name, "org.mpris.MediaPlayer2.spotify");
     }
 
     #[test]
@@ -281,6 +529,14 @@ mod tests {
             artist: "Boards of Canada".to_string(),
             album: "Music Has the Right to Children".to_string(),
             title: "Roygbiv".to_string(),
+            position_micros: None,
+            length_micros: None,
+            can_go_previous: false,
+            can_go_next: false,
+            can_play: false,
+            can_pause: false,
+            can_seek: false,
+            bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
         };
 
         let text = render_format(

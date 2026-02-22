@@ -7,7 +7,7 @@ Update checkbox status as work progresses.
 
 Top priorities from current work order:
 
-- [ ] Event-driven updates (no polling loop for metadata/state changes)
+- [x] Event-driven updates (no polling loop for metadata/state changes)
 - [ ] Playback controls UI (play/pause, previous, next, seek slider)
 - [ ] Dynamic visibility (show when active, hide when idle/no player)
 
@@ -19,7 +19,7 @@ Out of scope for first pass:
 
 Implement in small, reviewable slices. Do **not** one-shot all features.
 
-- [ ] Slice 1: Event-driven backend/state model
+- [x] Slice 1: Event-driven backend/state model
 - [ ] Slice 2: Dynamic visibility wiring
 - [ ] Slice 3: Popover controls + seeking slider
 - [ ] Slice 4: Hardening/tests/docs cleanup
@@ -30,19 +30,19 @@ Goal: Replace interval polling with event-driven MPRIS updates.
 
 Tasks:
 
-- [ ] Introduce backend state model struct (status, player id, title/artist/album, position, duration, capability flags)
-- [ ] Implement DBus watcher using existing `zbus` dependency (avoid shelling out to `playerctl --follow`)
-- [ ] Listen for player lifecycle and metadata/status changes (`NameOwnerChanged`, `PropertiesChanged`)
-- [ ] Select active player deterministically when multiple players exist (document strategy)
-- [ ] Push state updates to GTK thread via channel
-- [ ] Render label text from state placeholders
-- [ ] Preserve existing click command support and CSS class behavior
+- [x] Introduce backend state model struct (status, player id, title/artist/album, position, duration, capability flags)
+- [x] Implement DBus watcher using existing `zbus` dependency (avoid shelling out to `playerctl --follow`)
+- [x] Listen for player lifecycle and metadata/status changes (`NameOwnerChanged`, `PropertiesChanged`)
+- [x] Select active player deterministically when multiple players exist (document strategy)
+- [x] Push state updates to GTK thread via channel
+- [x] Render label text from state placeholders
+- [x] Preserve existing click command support and CSS class behavior
 
 Acceptance criteria:
 
-- [ ] Metadata/status updates happen without periodic metadata polling
-- [ ] No regressions in existing module config parsing
-- [ ] `make ci` passes
+- [x] Metadata/status updates happen without periodic metadata polling
+- [x] No regressions in existing module config parsing
+- [x] `make ci` passes
 
 ## Slice 2: Dynamic Visibility
 
