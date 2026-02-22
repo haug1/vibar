@@ -438,7 +438,7 @@ Styling:
 
 - Tray container classes: `.module.tray`
 - Item class: `.tray-item`
-- Menu classes: `.tray-menu-popover`, `.tray-menu-content`, `.tray-menu-item`
+- Menu classes: `.tray-menu-popover`, `.tray-menu-content`, `.tray-menu-item`, `.tray-menu-toggle`
 - Optional extra class via `class` field.
 
 ## `pulseaudio`
