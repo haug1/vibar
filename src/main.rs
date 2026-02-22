@@ -1,7 +1,9 @@
+use glib::ControlFlow;
 use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Box as GtkBox, CenterBox, Orientation};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use std::time::Duration;
 
 mod config;
 mod modules;
@@ -134,10 +136,18 @@ fn debug_dump_dom_if_enabled(window: &ApplicationWindow, connector: Option<&str>
         return;
     }
 
-    let monitor_name = connector.unwrap_or("unknown");
-    eprintln!("vibar/dom: monitor={monitor_name}");
-    let root: gtk::Widget = window.clone().upcast();
-    debug_dump_widget_tree(&root, 0);
+    let monitor_name = connector.unwrap_or("unknown").to_string();
+    dump_dom_snapshot(window, &monitor_name);
+
+    let interval_secs = dom_debug_interval_secs();
+    glib::timeout_add_local(Duration::from_secs(interval_secs), {
+        let window = window.clone();
+        let monitor_name = monitor_name.clone();
+        move || {
+            dump_dom_snapshot(&window, &monitor_name);
+            ControlFlow::Continue
+        }
+    });
 }
 
 fn debug_dump_widget_tree(widget: &gtk::Widget, depth: usize) {
@@ -167,6 +177,20 @@ fn dom_debug_enabled() -> bool {
     std::env::var("VIBAR_DEBUG_DOM")
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(false)
+}
+
+fn dom_debug_interval_secs() -> u64 {
+    std::env::var("VIBAR_DEBUG_DOM_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value >= 1)
+        .unwrap_or(10)
+}
+
+fn dump_dom_snapshot(window: &ApplicationWindow, monitor_name: &str) {
+    eprintln!("vibar/dom: monitor={monitor_name}");
+    let root: gtk::Widget = window.clone().upcast();
+    debug_dump_widget_tree(&root, 0);
 }
 
 #[cfg(test)]

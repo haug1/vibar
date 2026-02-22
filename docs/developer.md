@@ -37,7 +37,9 @@ This document contains implementation-facing details that are intentionally kept
 - To log tray DBus click method calls/errors, run with `VIBAR_DEBUG_TRAY=1`.
   - Example: `VIBAR_DEBUG_TRAY=1 cargo run --locked`
 - To print the GTK widget tree with CSS classes for selector discovery, run with `VIBAR_DEBUG_DOM=1`.
-  - Example: `VIBAR_DEBUG_DOM=1 cargo run --locked`
+  - Dumps at startup and then periodically (default every 10s).
+  - Optional interval override: `VIBAR_DEBUG_DOM_INTERVAL_SECS=<n>` (minimum `1`).
+  - Example: `VIBAR_DEBUG_DOM=1 VIBAR_DEBUG_DOM_INTERVAL_SECS=5 cargo run --locked`
 
 ## Notes
 

@@ -26,7 +26,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
 - Shared helper `modules::attach_primary_click_command(...)` centralizes click-command wiring and `.clickable` CSS class behavior across modules
-- `VIBAR_DEBUG_DOM=1` prints widget tree + CSS classes at startup for selector debugging
+- `VIBAR_DEBUG_DOM=1` prints widget tree + CSS classes at startup and periodically (default 10s); interval override via `VIBAR_DEBUG_DOM_INTERVAL_SECS`
 
 ## Standard Commands
 
