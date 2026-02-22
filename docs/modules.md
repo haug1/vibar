@@ -14,7 +14,7 @@ Top-level config uses three layout areas:
   },
   "areas": {
     "left": [{ "type": "sway/workspaces" }],
-    "center": [{ "type": "exec", "command": "echo center" }],
+    "center": [{ "type": "playerctl", "format": "{status_icon} {artist} - {title}" }],
     "right": [
       {
         "type": "group",
@@ -153,6 +153,61 @@ Styling:
 
 - Label classes: `.module.clock`
 - Click-enabled labels also include: `.clickable`
+
+## `playerctl`
+
+Schema:
+
+```json
+{
+  "type": "playerctl",
+  "format": "{status_icon} {title}",
+  "player": "spotify",
+  "interval_secs": 1,
+  "no_player_text": "No media",
+  "click": "playerctl play-pause",
+  "class": "optional-css-classes"
+}
+```
+
+Fields:
+
+- `format` (optional): output format template.
+  - Default: `{status_icon} {title}`
+- `player` (optional): player selector passed to `playerctl --player <name>`.
+- `interval_secs` (optional): polling interval in seconds.
+  - Default: `1`
+  - Minimum: `1` (values below are clamped)
+- `no_player_text` (optional): text shown when no matching player is available.
+  - Default: `No media`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+
+Format placeholders:
+
+- `{status}`
+- `{status_icon}`
+- `{player}`
+- `{artist}`
+- `{album}`
+- `{title}`
+
+Behavior:
+
+- Polls metadata with `playerctl metadata --format`.
+- Handles known "no players" errors and shows `no_player_text` instead.
+- Status icon defaults:
+  - `playing` -> ``
+  - `paused` -> ``
+  - `stopped` -> ``
+  - fallback -> ``
+
+Styling:
+
+- Label classes: `.module.playerctl`
+- Click-enabled labels also include: `.clickable`
+- Optional extra class via `class` field.
 
 ## `exec`
 

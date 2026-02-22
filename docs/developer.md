@@ -4,7 +4,7 @@ This document contains implementation-facing details that are intentionally kept
 
 ## Architecture
 
-- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `sway/workspaces`, `pulseaudio`).
+- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `playerctl`, `sway/workspaces`, `pulseaudio`).
 - `src/modules/mod.rs` stores raw module config entries:
   - `type: String`
   - module-specific fields as a dynamic map (`serde_json::Map<String, Value>`)
@@ -16,6 +16,7 @@ This document contains implementation-facing details that are intentionally kept
 - `modules::build_module(...)` finds the registered factory by module type and initializes it.
 - `group` is a composite module that recursively calls `build_module(...)` for child entries.
 - `exec` supports Waybar-compatible output parsing (`i3blocks` line mode and JSON `text`/`class`) and applies dynamic output classes each update.
+- `playerctl` polls media metadata/status via the `playerctl` CLI and supports placeholder-based output formatting.
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`.
 - Config loading prefers `~/.config/vibar/config.jsonc`, then falls back to `./config.jsonc`.
 - Top-level style config supports layered CSS (`style.load-default` + `style.path`).

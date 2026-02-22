@@ -112,6 +112,7 @@
 }
 
 .clock,
+.playerctl,
 .exec {
   color: #e6eefb;
   font-weight: 500;
