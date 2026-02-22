@@ -7,7 +7,9 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::{attach_primary_click_command, ModuleBuildContext, ModuleConfig};
+use crate::modules::{
+    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+};
 
 use super::ModuleFactory;
 
@@ -100,9 +102,7 @@ pub(crate) fn build_disk_module(
     label.add_css_class("module");
     label.add_css_class("disk");
 
-    if let Some(class_name) = class {
-        label.add_css_class(&class_name);
-    }
+    apply_css_classes(&label, class.as_deref());
 
     attach_primary_click_command(&label, click_command);
 

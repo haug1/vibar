@@ -49,6 +49,7 @@ make ci
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system
+- Exec module supports Waybar-compatible output parsing (i3blocks lines + JSON `text`/`class`)
 - Group module for logical submodule grouping and optional drawer-style expansion
 - Native PulseAudio module with event-driven updates and scroll-step volume control
 - Config file search order:
@@ -84,6 +85,7 @@ Styling config supports:
 
 - Module configuration and styling selectors: [`docs/modules.md`](./docs/modules.md)
 - Developer architecture and extension notes: [`docs/developer.md`](./docs/developer.md)
+  - Includes debug env vars such as `VIBAR_DEBUG_DOM=1` for widget/CSS selector discovery.
 
 ## Acknowledgements
 

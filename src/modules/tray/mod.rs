@@ -9,7 +9,7 @@ use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, GestureClick, IconLookupFlags, Image, Orientation, Widget};
 use serde_json::Value;
 
-use crate::modules::{ModuleBuildContext, ModuleConfig};
+use crate::modules::{apply_css_classes, ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -63,9 +63,7 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
     container.add_css_class("module");
     container.add_css_class("tray");
 
-    if let Some(class_name) = config.class {
-        container.add_css_class(&class_name);
-    }
+    apply_css_classes(&container, config.class.as_deref());
 
     let icon_size = normalized_icon_size(config.icon_size);
     let poll_interval_secs = normalized_poll_interval_secs(config.poll_interval_secs);

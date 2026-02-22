@@ -4,7 +4,9 @@ use serde::de::Deserializer;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::{build_module, ModuleBuildContext, ModuleConfig, ModuleFactory};
+use crate::modules::{
+    apply_css_classes, build_module, ModuleBuildContext, ModuleConfig, ModuleFactory,
+};
 
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct GroupConfig {
@@ -83,9 +85,7 @@ fn build_group_module(config: GroupConfig, context: &ModuleBuildContext) -> Resu
     container.set_focusable(false);
     container.set_focus_on_click(false);
 
-    if let Some(class_name) = config.class {
-        container.add_css_class(&class_name);
-    }
+    apply_css_classes(&container, config.class.as_deref());
 
     let child_orientation = if config.drawer.is_some() {
         Orientation::Vertical

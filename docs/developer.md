@@ -15,6 +15,7 @@ This document contains implementation-facing details that are intentionally kept
   - widget initialization
 - `modules::build_module(...)` finds the registered factory by module type and initializes it.
 - `group` is a composite module that recursively calls `build_module(...)` for child entries.
+- `exec` supports Waybar-compatible output parsing (`i3blocks` line mode and JSON `text`/`class`) and applies dynamic output classes each update.
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`.
 - Config loading prefers `~/.config/vibar/config.jsonc`, then falls back to `./config.jsonc`.
 - Top-level style config supports layered CSS (`style.load-default` + `style.path`).
@@ -35,6 +36,8 @@ This document contains implementation-facing details that are intentionally kept
   - Example: `VIBAR_DEBUG_WORKSPACES=1 cargo run --locked`
 - To log tray DBus click method calls/errors, run with `VIBAR_DEBUG_TRAY=1`.
   - Example: `VIBAR_DEBUG_TRAY=1 cargo run --locked`
+- To print the GTK widget tree with CSS classes for selector discovery, run with `VIBAR_DEBUG_DOM=1`.
+  - Example: `VIBAR_DEBUG_DOM=1 cargo run --locked`
 
 ## Notes
 

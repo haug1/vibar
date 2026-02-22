@@ -25,12 +25,15 @@ fn main() {
         let monitors = connected_monitors();
         if monitors.is_empty() {
             let window = build_window(app, &loaded_config.config, None);
+            debug_dump_dom_if_enabled(&window, None);
             window.present();
             return;
         }
 
         for monitor in monitors {
             let window = build_window(app, &loaded_config.config, Some(&monitor));
+            let connector = monitor.connector().map(|value| value.to_string());
+            debug_dump_dom_if_enabled(&window, connector.as_deref());
             window.present();
         }
     });
@@ -124,6 +127,46 @@ fn build_area(container: &GtkBox, modules: &[ModuleConfig], context: &ModuleBuil
             }
         }
     }
+}
+
+fn debug_dump_dom_if_enabled(window: &ApplicationWindow, connector: Option<&str>) {
+    if !dom_debug_enabled() {
+        return;
+    }
+
+    let monitor_name = connector.unwrap_or("unknown");
+    eprintln!("vibar/dom: monitor={monitor_name}");
+    let root: gtk::Widget = window.clone().upcast();
+    debug_dump_widget_tree(&root, 0);
+}
+
+fn debug_dump_widget_tree(widget: &gtk::Widget, depth: usize) {
+    let indent = "  ".repeat(depth);
+    let classes = widget
+        .css_classes()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let type_name = widget.type_().name();
+
+    if classes.is_empty() {
+        eprintln!("vibar/dom: {indent}{type_name}");
+    } else {
+        eprintln!("vibar/dom: {indent}{type_name} .{classes}");
+    }
+
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        debug_dump_widget_tree(&current, depth + 1);
+        child = current.next_sibling();
+    }
+}
+
+fn dom_debug_enabled() -> bool {
+    std::env::var("VIBAR_DEBUG_DOM")
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

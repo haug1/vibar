@@ -18,7 +18,9 @@ use pulse::volume::Volume;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::{attach_primary_click_command, ModuleBuildContext, ModuleConfig};
+use crate::modules::{
+    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+};
 
 use super::ModuleFactory;
 
@@ -187,9 +189,7 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
     label.add_css_class("module");
     label.add_css_class("pulseaudio");
 
-    if let Some(class_name) = config.class.clone() {
-        label.add_css_class(&class_name);
-    }
+    apply_css_classes(&label, config.class.as_deref());
 
     attach_primary_click_command(&label, click_command);
 

@@ -22,9 +22,11 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Clock module supports optional `click` / `on-click` shell actions
 - PulseAudio module supports click actions, Waybar-style format keys, scroll volume, and event-driven native `libpulse` updates
 - Exec module supports optional `click` / `on-click` shell actions
+- Exec module parses Waybar-compatible output (`i3blocks` line format + JSON `text`/`class`) and applies dynamic CSS classes from output
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
 - Shared helper `modules::attach_primary_click_command(...)` centralizes click-command wiring and `.clickable` CSS class behavior across modules
+- `VIBAR_DEBUG_DOM=1` prints widget tree + CSS classes at startup for selector debugging
 
 ## Standard Commands
 

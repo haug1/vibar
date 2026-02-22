@@ -57,7 +57,7 @@ Schema:
 ```json
 {
   "type": "group",
-  "class": "optional-css-class",
+  "class": "optional-css-classes",
   "spacing": 6,
   "modules": [{ "type": "pulseaudio" }, { "type": "tray" }],
   "drawer": {
@@ -72,7 +72,7 @@ Fields:
 
 - `modules` (required): child modules rendered inside the group.
 - `children` (optional alias): alias for `modules`.
-- `class` (optional): extra CSS class on the group container.
+- `class` (optional): extra CSS class(es) on the group container (whitespace-separated).
 - `spacing` (optional): spacing in px between child modules.
   - Default: `6`
   - Minimum: `0` (values below are clamped)
@@ -163,7 +163,7 @@ Schema:
   "command": "your shell command",
   "click": "optional shell command",
   "interval_secs": 5,
-  "class": "optional-css-class"
+  "class": "optional-css-classes"
 }
 ```
 
@@ -175,12 +175,15 @@ Fields:
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `5`
   - Minimum: `1` (values below are clamped)
-- `class` (optional): extra CSS class on the module label.
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Behavior:
 
 - Shows command output in a label.
-- If stdout is empty, stderr is used.
+- If stdout is empty, stderr is used as fallback text.
+- Output parsing is Waybar-compatible:
+  - i3blocks style (default): line 1 = text, line 2 = tooltip (ignored), line 3 = CSS class list.
+  - JSON style: if output is valid JSON, `text` and `class` fields are used (`class` supports string or string array).
 - Identical `command` + `interval_secs` instances share one backend poller across bar windows.
 
 Styling:
@@ -200,7 +203,7 @@ Schema:
   "click": "dolphin",
   "path": "/",
   "interval_secs": 30,
-  "class": "optional-css-class"
+  "class": "optional-css-classes"
 }
 ```
 
@@ -215,7 +218,7 @@ Fields:
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `30`
   - Minimum: `1` (values below are clamped)
-- `class` (optional): extra CSS class on the module label.
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Format placeholders:
 
@@ -246,7 +249,7 @@ Schema:
   "type": "tray",
   "icon_size": 16,
   "poll_interval_secs": 2,
-  "class": "optional-css-class"
+  "class": "optional-css-classes"
 }
 ```
 
@@ -258,7 +261,7 @@ Fields:
 - `poll_interval_secs` (optional): tray item discovery/update poll interval.
   - Default: `2`
   - Minimum: `1` (values below are clamped)
-- `class` (optional): extra CSS class on tray container.
+- `class` (optional): extra CSS class(es) on tray container (whitespace-separated).
 
 Behavior:
 
@@ -302,7 +305,7 @@ Schema:
     "default": ["", "", ""]
   },
   "click": "pavucontrol",
-  "class": "optional-css-class"
+  "class": "optional-css-classes"
 }
 ```
 
@@ -329,7 +332,7 @@ Fields:
   - Default: `["", "", ""]`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
-- `class` (optional): extra CSS class on the module label.
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Format placeholders:
 

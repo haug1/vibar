@@ -79,6 +79,16 @@ pub(crate) fn attach_primary_click_command(widget: &impl IsA<Widget>, command: O
     widget.add_controller(click);
 }
 
+pub(crate) fn apply_css_classes(widget: &impl IsA<Widget>, classes: Option<&str>) {
+    let Some(classes) = classes else {
+        return;
+    };
+
+    for class_name in classes.split_whitespace() {
+        widget.add_css_class(class_name);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::Map;

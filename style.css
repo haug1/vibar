@@ -75,7 +75,8 @@
   box-shadow: none;
 }
 
-.module.clickable {
+.module.clickable,
+.v-mod {
   background: rgba(146, 177, 222, 0.12);
   border: 1px solid rgba(176, 206, 245, 0.22);
   border-radius: 8px;
