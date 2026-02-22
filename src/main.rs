@@ -12,7 +12,7 @@ mod style;
 use config::{load_config, Config};
 use modules::{ModuleBuildContext, ModuleConfig};
 
-const APP_ID: &str = "com.example.vibar";
+const APP_ID: &str = "dev.haug1.vibar";
 
 fn main() {
     let app = Application::builder().application_id(APP_ID).build();

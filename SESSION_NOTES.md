@@ -20,7 +20,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Config-driven modules (current set documented in `docs/modules.md`)
 - Group module supports nested modules for shared styling and optional drawer reveal behavior
 - Config lookup order: `~/.config/vibar/config.jsonc` then `./config.jsonc`
-- Workspace module is output-local per monitor and event-driven via sway IPC
+- Sway workspace module (`sway/workspaces`) is output-local per monitor and event-driven via sway IPC
 - Clock module supports optional `click` / `on-click` shell actions
 - PulseAudio module supports click actions, Waybar-style format keys, scroll volume, and event-driven native `libpulse` updates
 - Exec module supports optional `click` / `on-click` shell actions

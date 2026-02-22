@@ -62,7 +62,7 @@ impl Default for StyleConfig {
 }
 
 fn default_left() -> Vec<ModuleConfig> {
-    vec![crate::modules::sway::workspace::default_module_config()]
+    vec![crate::modules::sway::workspaces::default_module_config()]
 }
 
 fn default_right() -> Vec<ModuleConfig> {

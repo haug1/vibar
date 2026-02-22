@@ -13,7 +13,7 @@ Top-level config uses three layout areas:
     "path": "~/.config/vibar/style.css"
   },
   "areas": {
-    "left": [{ "type": "workspaces" }],
+    "left": [{ "type": "sway/workspaces" }],
     "center": [{ "type": "exec", "command": "echo center" }],
     "right": [
       {
@@ -104,12 +104,12 @@ Styling:
 - Child row container class: `.group-content`
 - Optional extra class via `class` field.
 
-## `workspaces`
+## `sway/workspaces`
 
 Minimal schema:
 
 ```json
-{ "type": "workspaces" }
+{ "type": "sway/workspaces" }
 ```
 
 Behavior:

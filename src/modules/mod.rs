@@ -43,7 +43,7 @@ const FACTORIES: &[&dyn ModuleFactory] = &[
     &disk::FACTORY,
     &group::FACTORY,
     &pulseaudio::FACTORY,
-    &sway::workspace::FACTORY,
+    &sway::workspaces::FACTORY,
     &clock::FACTORY,
     &tray::FACTORY,
 ];

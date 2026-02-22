@@ -17,7 +17,7 @@ pub(crate) struct WorkspaceConfig {}
 pub(crate) struct SwayWorkspaceFactory;
 
 pub(crate) const FACTORY: SwayWorkspaceFactory = SwayWorkspaceFactory;
-pub(crate) const MODULE_TYPE: &str = "workspaces";
+pub(crate) const MODULE_TYPE: &str = "sway/workspaces";
 
 impl ModuleFactory for SwayWorkspaceFactory {
     fn module_type(&self) -> &'static str {

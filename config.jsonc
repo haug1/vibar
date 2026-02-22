@@ -12,7 +12,7 @@
     // "path": "~/.config/vibar/style.css"
   },
   "areas": {
-    "left": [{ "type": "workspaces" }],
+    "left": [{ "type": "sway/workspaces" }],
     "center": [],
     "right": [
       { "type": "pulseaudio", "click": "pavucontrol" },
