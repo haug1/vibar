@@ -163,8 +163,9 @@ Schema:
   "type": "playerctl",
   "format": "{status_icon} {title}",
   "player": "spotify",
-  "interval_secs": 1,
   "no_player_text": "No media",
+  "hide-when-idle": true,
+  "show-when-paused": true,
   "click": "playerctl play-pause",
   "class": "optional-css-classes"
 }
@@ -177,9 +178,13 @@ Fields:
 - `player` (optional): player selector passed to `playerctl --player <name>`.
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `1`
-  - Minimum: `1` (values below are clamped)
+  - Note: kept for backward-compatibility; ignored by event-driven backend.
 - `no_player_text` (optional): text shown when no matching player is available.
   - Default: `No media`
+- `hide-when-idle` / `hide_when_idle` (optional): hide module when idle/no player.
+  - Default: `false`
+- `show-when-paused` / `show_when_paused` (optional): when `hide-when-idle=true`, keep module visible while paused.
+  - Default: `true`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
@@ -195,8 +200,9 @@ Format placeholders:
 
 Behavior:
 
-- Polls metadata with `playerctl metadata --format`.
-- Handles known "no players" errors and shows `no_player_text` instead.
+- Event-driven updates from MPRIS over DBus (`NameOwnerChanged` + `PropertiesChanged`).
+- Active player selection policy: `playing` > `paused` > `stopped`, then stable bus-name sort.
+- If no matching player exists, module text falls back to `no_player_text`.
 - Status icon defaults:
   - `playing` -> ``
   - `paused` -> ``
@@ -206,6 +212,7 @@ Behavior:
 Styling:
 
 - Label classes: `.module.playerctl`
+- State classes: `.status-playing`, `.status-paused`, `.status-stopped`, `.no-player`
 - Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 

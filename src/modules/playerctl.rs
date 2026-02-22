@@ -27,6 +27,12 @@ const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const MPRIS_PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
 const MPRIS_ROOT_INTERFACE: &str = "org.mpris.MediaPlayer2";
 const DBUS_PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
+const PLAYERCTL_STATE_CLASSES: [&str; 4] = [
+    "status-playing",
+    "status-paused",
+    "status-stopped",
+    "no-player",
+];
 pub(crate) const MODULE_TYPE: &str = "playerctl";
 
 #[derive(Debug, Deserialize, Clone)]
@@ -46,6 +52,14 @@ pub(crate) struct PlayerctlConfig {
     pub(crate) class: Option<String>,
     #[serde(default = "default_no_player_text")]
     pub(crate) no_player_text: String,
+    #[serde(rename = "hide-when-idle", alias = "hide_when_idle", default)]
+    pub(crate) hide_when_idle: bool,
+    #[serde(
+        rename = "show-when-paused",
+        alias = "show_when_paused",
+        default = "default_show_when_paused"
+    )]
+    pub(crate) show_when_paused: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +81,18 @@ struct PlayerctlMetadata {
 }
 
 #[derive(Debug, Clone)]
+struct PlayerctlViewConfig {
+    format: String,
+    click_command: Option<String>,
+    interval_secs: u32,
+    player: Option<String>,
+    class: Option<String>,
+    no_player_text: String,
+    hide_when_idle: bool,
+    show_when_paused: bool,
+}
+
+#[derive(Debug, Clone)]
 enum BackendUpdate {
     Snapshot(Option<PlayerctlMetadata>),
     Error(String),
@@ -83,20 +109,20 @@ impl ModuleFactory for PlayerctlFactory {
 
     fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
-        let format = parsed
-            .format
-            .unwrap_or_else(|| DEFAULT_PLAYERCTL_FORMAT.to_string());
-        let click_command = parsed.click.or(parsed.on_click);
+        let view = PlayerctlViewConfig {
+            format: parsed
+                .format
+                .unwrap_or_else(|| DEFAULT_PLAYERCTL_FORMAT.to_string()),
+            click_command: parsed.click.or(parsed.on_click),
+            interval_secs: parsed.interval_secs,
+            player: parsed.player,
+            class: parsed.class,
+            no_player_text: parsed.no_player_text,
+            hide_when_idle: parsed.hide_when_idle,
+            show_when_paused: parsed.show_when_paused,
+        };
 
-        Ok(build_playerctl_module(
-            format,
-            click_command,
-            parsed.interval_secs,
-            parsed.player,
-            parsed.class,
-            parsed.no_player_text,
-        )
-        .upcast())
+        Ok(build_playerctl_module(view).upcast())
     }
 }
 
@@ -106,6 +132,10 @@ fn default_playerctl_interval() -> u32 {
 
 fn default_no_player_text() -> String {
     DEFAULT_NO_PLAYER_TEXT.to_string()
+}
+
+fn default_show_when_paused() -> bool {
+    true
 }
 
 pub(crate) fn parse_config(module: &ModuleConfig) -> Result<PlayerctlConfig, String> {
@@ -120,41 +150,53 @@ pub(crate) fn parse_config(module: &ModuleConfig) -> Result<PlayerctlConfig, Str
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-pub(crate) fn build_playerctl_module(
-    format: String,
-    click_command: Option<String>,
-    interval_secs: u32,
-    player: Option<String>,
-    class: Option<String>,
-    no_player_text: String,
-) -> Label {
+fn build_playerctl_module(config: PlayerctlViewConfig) -> Label {
     let label = Label::new(None);
     label.add_css_class("module");
     label.add_css_class("playerctl");
 
-    apply_css_classes(&label, class.as_deref());
-    attach_primary_click_command(&label, click_command);
+    apply_css_classes(&label, config.class.as_deref());
+    attach_primary_click_command(&label, config.click_command.clone());
 
-    if interval_secs != DEFAULT_PLAYERCTL_INTERVAL_SECS {
+    if config.interval_secs != DEFAULT_PLAYERCTL_INTERVAL_SECS {
         eprintln!(
             "playerctl interval_secs={} is ignored in event-driven mode",
-            interval_secs
+            config.interval_secs
         );
     }
 
     let (sender, receiver) = mpsc::channel::<BackendUpdate>();
-    std::thread::spawn(move || run_event_backend(sender, player));
+    std::thread::spawn({
+        let player = config.player.clone();
+        move || run_event_backend(sender, player)
+    });
 
     glib::timeout_add_local(Duration::from_millis(200), {
         let label = label.clone();
+        let format = config.format.clone();
+        let no_player_text = config.no_player_text.clone();
+        let hide_when_idle = config.hide_when_idle;
+        let show_when_paused = config.show_when_paused;
         move || {
             while let Ok(update) = receiver.try_recv() {
-                let text = match update {
-                    BackendUpdate::Snapshot(Some(metadata)) => render_format(&format, &metadata),
-                    BackendUpdate::Snapshot(None) => no_player_text.clone(),
-                    BackendUpdate::Error(err) => format!("playerctl error: {err}"),
+                let (text, visibility, state_class) = match update {
+                    BackendUpdate::Snapshot(Some(metadata)) => (
+                        render_format(&format, &metadata),
+                        should_show_metadata(Some(&metadata), hide_when_idle, show_when_paused),
+                        status_css_class(&metadata.status),
+                    ),
+                    BackendUpdate::Snapshot(None) => (
+                        no_player_text.clone(),
+                        should_show_metadata(None, hide_when_idle, show_when_paused),
+                        "no-player",
+                    ),
+                    BackendUpdate::Error(err) => {
+                        (format!("playerctl error: {err}"), true, "no-player")
+                    }
                 };
                 label.set_text(&text);
+                label.set_visible(visibility);
+                apply_state_class(&label, state_class);
             }
             ControlFlow::Continue
         }
@@ -449,6 +491,42 @@ fn render_format(format: &str, metadata: &PlayerctlMetadata) -> String {
         .replace("{title}", &metadata.title)
 }
 
+fn should_show_metadata(
+    metadata: Option<&PlayerctlMetadata>,
+    hide_when_idle: bool,
+    show_when_paused: bool,
+) -> bool {
+    if !hide_when_idle {
+        return true;
+    }
+
+    let Some(metadata) = metadata else {
+        return false;
+    };
+
+    match metadata.status.as_str() {
+        "playing" => true,
+        "paused" => show_when_paused,
+        _ => false,
+    }
+}
+
+fn status_css_class(status: &str) -> &'static str {
+    match status {
+        "playing" => "status-playing",
+        "paused" => "status-paused",
+        "stopped" => "status-stopped",
+        _ => "no-player",
+    }
+}
+
+fn apply_state_class(label: &Label, active_class: &str) {
+    for class_name in PLAYERCTL_STATE_CLASSES {
+        label.remove_css_class(class_name);
+    }
+    label.add_css_class(active_class);
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::Map;
@@ -544,5 +622,57 @@ mod tests {
             &metadata,
         );
         assert_eq!(text, " Boards of Canada - Roygbiv (spotify) [paused]");
+    }
+
+    #[test]
+    fn parse_config_applies_visibility_defaults() {
+        let module = ModuleConfig::new(MODULE_TYPE, Map::new());
+        let cfg = parse_config(&module).expect("config should parse");
+
+        assert!(!cfg.hide_when_idle);
+        assert!(cfg.show_when_paused);
+    }
+
+    #[test]
+    fn should_show_metadata_respects_visibility_settings() {
+        let playing = PlayerctlMetadata {
+            status: "playing".to_string(),
+            status_icon: "",
+            player: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            title: String::new(),
+            position_micros: None,
+            length_micros: None,
+            can_go_previous: false,
+            can_go_next: false,
+            can_play: false,
+            can_pause: false,
+            can_seek: false,
+            bus_name: String::new(),
+        };
+        let paused = PlayerctlMetadata {
+            status: "paused".to_string(),
+            ..playing.clone()
+        };
+        let stopped = PlayerctlMetadata {
+            status: "stopped".to_string(),
+            ..playing.clone()
+        };
+
+        assert!(should_show_metadata(Some(&playing), true, true));
+        assert!(should_show_metadata(Some(&paused), true, true));
+        assert!(!should_show_metadata(Some(&paused), true, false));
+        assert!(!should_show_metadata(Some(&stopped), true, true));
+        assert!(!should_show_metadata(None, true, true));
+        assert!(should_show_metadata(None, false, false));
+    }
+
+    #[test]
+    fn status_css_class_maps_statuses() {
+        assert_eq!(status_css_class("playing"), "status-playing");
+        assert_eq!(status_css_class("paused"), "status-paused");
+        assert_eq!(status_css_class("stopped"), "status-stopped");
+        assert_eq!(status_css_class("unknown"), "no-player");
     }
 }

@@ -1,79 +1,36 @@
 # Playerctl Work Order
 
-This file is the execution checklist for upgrading the `playerctl` module.
-Update checkbox status as work progresses.
+Active execution checklist for the remaining `playerctl` upgrades.
+Keep this file current as slices are completed.
 
-## Scope
+## Status
 
-Top priorities from current work order:
+- [x] Slice 1 complete: event-driven backend/state model
+- [x] Slice 2 complete: dynamic visibility + state CSS classes
+- [ ] Slice 3 pending: controls popover + seek slider
+- [ ] Slice 4 pending: hardening + docs/config sync
 
-- [x] Event-driven updates (no polling loop for metadata/state changes)
-- [ ] Playback controls UI (play/pause, previous, next, seek slider)
-- [ ] Dynamic visibility (show when active, hide when idle/no player)
+## Current Behavior (implemented)
 
-Out of scope for first pass:
-
-- [ ] Player volume adjustment from this module (track as follow-up)
-
-## Delivery Strategy
-
-Implement in small, reviewable slices. Do **not** one-shot all features.
-
-- [x] Slice 1: Event-driven backend/state model
-- [ ] Slice 2: Dynamic visibility wiring
-- [ ] Slice 3: Popover controls + seeking slider
-- [ ] Slice 4: Hardening/tests/docs cleanup
-
-## Slice 1: Event-Driven Backend
-
-Goal: Replace interval polling with event-driven MPRIS updates.
-
-Tasks:
-
-- [x] Introduce backend state model struct (status, player id, title/artist/album, position, duration, capability flags)
-- [x] Implement DBus watcher using existing `zbus` dependency (avoid shelling out to `playerctl --follow`)
-- [x] Listen for player lifecycle and metadata/status changes (`NameOwnerChanged`, `PropertiesChanged`)
-- [x] Select active player deterministically when multiple players exist (document strategy)
-- [x] Push state updates to GTK thread via channel
-- [x] Render label text from state placeholders
-- [x] Preserve existing click command support and CSS class behavior
-
-Acceptance criteria:
-
-- [x] Metadata/status updates happen without periodic metadata polling
-- [x] No regressions in existing module config parsing
-- [x] `make ci` passes
-
-## Slice 2: Dynamic Visibility
-
-Goal: Module hides when inactive and reappears when active.
-
-Config additions:
-
-- [ ] `hide_when_idle` (bool, default `false`)
-- [ ] Optional `show_when_paused` (bool, default `true`) for behavior tuning
-
-Tasks:
-
-- [ ] Apply visibility rules from live state
-- [ ] Hide when no active player or stopped (per config)
-- [ ] Ensure widget reappears immediately on activity
-- [ ] Add CSS class toggles for state (`status-playing`, `status-paused`, `status-stopped`, `no-player`)
-
-Acceptance criteria:
-
-- [ ] Module visibility changes without restart
-- [ ] Works across player start/stop transitions
-- [ ] `make ci` passes
+- Event-driven updates via DBus (`NameOwnerChanged` + `PropertiesChanged`)
+- Active player auto-selection policy: `playing` > `paused` > `stopped`, then stable name sort
+- Dynamic visibility config:
+  - `hide-when-idle` / `hide_when_idle` (default `false`)
+  - `show-when-paused` / `show_when_paused` (default `true`)
+- State CSS classes on module label:
+  - `status-playing`
+  - `status-paused`
+  - `status-stopped`
+  - `no-player`
 
 ## Slice 3: Controls Popover + Seek Slider
 
-Goal: Add optional on-click controls UI with transport controls and precise seeking.
+Goal: Optional on-click controls UI with transport controls and precise seeking.
 
 Config additions:
 
 - [ ] `controls.enabled` (bool, default `false`)
-- [ ] `controls.open` trigger mode (initial: left-click only)
+- [ ] `controls.open` trigger mode (initial scope: left-click)
 - [ ] `controls.show_seek` (bool, default `true`)
 
 Tasks:
@@ -81,45 +38,44 @@ Tasks:
 - [ ] Replace bare label root with container suitable for popover anchor
 - [ ] Add popover with buttons: previous, play/pause, next
 - [ ] Wire buttons to MPRIS methods (`Previous`, `PlayPause`, `Next`)
-- [ ] Add seek slider bound to position/duration
-- [ ] Implement precise seek via `SetPosition` and guard with `CanSeek`
+- [ ] Add seek slider bound to `position` / `duration`
+- [ ] Implement precise seek via `SetPosition` (guard with `CanSeek`)
 - [ ] Prevent slider feedback loops while scrubbing
-- [ ] Keep label mode functional when controls disabled
+- [ ] Keep legacy label behavior when controls are disabled
 
 Acceptance criteria:
 
-- [ ] Controls work on at least one common player (e.g. Spotify/mpv)
+- [ ] Controls work with at least one common player (Spotify/mpv)
 - [ ] Seek interactions are stable and precise
-- [ ] Popover UX doesn’t break bar layout
+- [ ] Popover behavior does not break bar layout
 - [ ] `make ci` passes
 
-## Slice 4: Hardening and Documentation
+## Slice 4: Hardening + Docs
 
 Tasks:
 
-- [ ] Add/expand unit tests for parsing/rendering/visibility logic
-- [ ] Add focused integration-ish tests for state transition handling where feasible
-- [ ] Update `docs/modules.md` with new config keys and behavior
+- [ ] Add/expand tests for rendering, state transition, and seek behavior logic
+- [ ] Update `docs/modules.md` for all new `playerctl` keys and classes
 - [ ] Update `README.md` feature summary
 - [ ] Update `docs/developer.md` architecture notes
-- [ ] Update `SESSION_NOTES.md` with final capabilities
-- [ ] Refresh `config.jsonc` example if defaults/schema changed
+- [ ] Update `SESSION_NOTES.md` final capability summary
+- [ ] Update `config.jsonc` example if schema/defaults changed
 
 Acceptance criteria:
 
 - [ ] `make ci` passes
-- [ ] Docs/config/examples remain in sync
+- [ ] Docs, examples, and implementation are in sync
 
-## Implementation Notes (for agent)
+## Open Decisions Before Slice 3
+
+- [ ] Trigger semantics when controls are enabled:
+  - replace existing `click` command behavior, or
+  - coexist via separate trigger mapping
+- [ ] Multi-player control target policy when several players are active
+- [ ] Whether paused state should keep seek slider interactive by default
+
+## Notes for Next Session
 
 - Keep changes incremental and commit per slice.
-- Prefer existing module patterns (`parse_config`, `ModuleFactory`, GTK main-thread updates).
-- Keep click command support (`click` / `on-click`) compatible unless explicitly replaced by controls mode.
-- Avoid destructive git operations.
-- If unexpected unrelated local changes appear, stop and ask user.
-
-## Open Questions (resolve before Slice 3)
-
-- [ ] Should controls popover replace `click` command when enabled, or can both coexist via separate triggers?
-- [ ] Desired active-player policy when multiple players are running (most recent, playing-first, config-specified)
-- [ ] Exact idle definition for visibility (no player vs paused vs stopped)
+- Preserve backward compatibility for current module keys unless intentionally versioned.
+- Avoid destructive git/file operations.

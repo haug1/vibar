@@ -49,7 +49,7 @@ make ci
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system
-- Playerctl module for media metadata/status via `playerctl`
+- Playerctl module with event-driven MPRIS metadata/status and optional idle auto-hide behavior
 - Exec module supports Waybar-compatible output parsing (i3blocks lines + JSON `text`/`class`)
 - CPU module with configurable polling interval, format placeholders, and default usage-level CSS classes
 - Memory module with configurable polling interval and format placeholders (including `{used_percentage}`)
