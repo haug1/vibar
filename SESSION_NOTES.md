@@ -8,6 +8,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Goal: minimal Wayland taskbar app (Rust + GTK4 + `gtk4-layer-shell`)
 - Current status: project passes CI (`make ci`)
 - Primary runtime target: sway/Wayland
+- CI build environment: GitHub Actions Ubuntu runner with Fedora 41 container for consistent GTK4 layer-shell dev packages
 
 ## Core Behavior
 

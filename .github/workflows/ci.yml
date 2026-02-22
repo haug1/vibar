@@ -6,40 +6,30 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    container:
+      image: fedora:41
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install system dependencies
         run: |
-          sudo apt-get install -y software-properties-common
-          sudo add-apt-repository -y universe
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            libgtk-4-dev \
-            libgtk4-layer-shell-dev \
-            libwayland-dev \
-            wayland-protocols
+          dnf install -y \
+            make \
+            gcc \
+            pkgconf-pkg-config \
+            gtk4-devel \
+            gtk4-layer-shell-devel \
+            wayland-devel \
+            wayland-protocols-devel \
+            rustup
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Verify lockfile exists
-        run: test -f Cargo.lock
-
-      - name: Format check
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: Build
-        run: cargo build --locked
-
-      - name: Test
-        run: cargo test --locked
+      - name: make ci
+        run: make ci
