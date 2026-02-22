@@ -120,10 +120,12 @@ pub(crate) fn build_cpu_module(
         loop {
             let update = match read_cpu_snapshot() {
                 Ok(current) => {
-                    let usage = match previous {
-                        Some(prev) => cpu_usage_between(prev, current),
-                        None => cpu_usage_overall(current),
+                    let Some(prev) = previous else {
+                        previous = Some(current);
+                        std::thread::sleep(Duration::from_millis(100));
+                        continue;
                     };
+                    let usage = cpu_usage_between(prev, current);
                     previous = Some(current);
                     CpuUpdate {
                         text: render_format(&poll_format, usage),
@@ -190,14 +192,6 @@ fn parse_proc_stat_cpu_line(stat: &str) -> Result<CpuSnapshot, String> {
     Ok(CpuSnapshot { idle, total })
 }
 
-fn cpu_usage_overall(snapshot: CpuSnapshot) -> f64 {
-    if snapshot.total == 0 {
-        0.0
-    } else {
-        ((snapshot.total.saturating_sub(snapshot.idle)) as f64 / snapshot.total as f64) * 100.0
-    }
-}
-
 fn cpu_usage_between(previous: CpuSnapshot, current: CpuSnapshot) -> f64 {
     let delta_total = current.total.saturating_sub(previous.total);
     if delta_total == 0 {
@@ -209,11 +203,12 @@ fn cpu_usage_between(previous: CpuSnapshot, current: CpuSnapshot) -> f64 {
 }
 
 fn render_format(format: &str, used_percentage: f64) -> String {
-    let idle_percentage = (100.0 - used_percentage).clamp(0.0, 100.0);
+    let used_percentage = used_percentage.clamp(0.0, 100.0) as u16;
+    let idle_percentage = 100u16.saturating_sub(used_percentage);
 
     format
-        .replace("{used_percentage}", &format!("{used_percentage:.0}"))
-        .replace("{idle_percentage}", &format!("{idle_percentage:.0}"))
+        .replace("{used_percentage}", &used_percentage.to_string())
+        .replace("{idle_percentage}", &idle_percentage.to_string())
 }
 
 fn usage_css_class(used_percentage: f64) -> &'static str {
@@ -273,6 +268,12 @@ mod tests {
     #[test]
     fn render_format_replaces_placeholders() {
         let text = render_format("{used_percentage}% {idle_percentage}%", 62.4);
+        assert_eq!(text, "62% 38%");
+    }
+
+    #[test]
+    fn render_format_truncates_percentage() {
+        let text = render_format("{used_percentage}% {idle_percentage}%", 62.9);
         assert_eq!(text, "62% 38%");
     }
 
