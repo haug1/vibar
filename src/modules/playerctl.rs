@@ -1,16 +1,20 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{self, Sender};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{Label, Widget};
+use gtk::{
+    Box as GtkBox, Button, GestureClick, Label, Orientation, Popover, PositionType, Scale, Widget,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use zbus::blocking::fdo::DBusProxy;
 use zbus::blocking::{Connection, MessageIterator, Proxy};
 use zbus::message::Type as MessageType;
-use zbus::zvariant::OwnedValue;
+use zbus::zvariant::{ObjectPath, OwnedValue};
 use zbus::MatchRule;
 
 use crate::modules::{
@@ -60,6 +64,40 @@ pub(crate) struct PlayerctlConfig {
         default = "default_show_when_paused"
     )]
     pub(crate) show_when_paused: bool,
+    #[serde(default)]
+    pub(crate) controls: PlayerctlControlsConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct PlayerctlControlsConfig {
+    #[serde(default)]
+    pub(crate) enabled: bool,
+    #[serde(default)]
+    pub(crate) open: PlayerctlControlsOpenMode,
+    #[serde(
+        rename = "show-seek",
+        alias = "show_seek",
+        default = "default_show_seek"
+    )]
+    pub(crate) show_seek: bool,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PlayerctlControlsOpenMode {
+    #[serde(alias = "left_click", alias = "left")]
+    #[default]
+    LeftClick,
+}
+
+impl Default for PlayerctlControlsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            open: PlayerctlControlsOpenMode::LeftClick,
+            show_seek: default_show_seek(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,6 +115,7 @@ struct PlayerctlMetadata {
     can_play: bool,
     can_pause: bool,
     can_seek: bool,
+    track_id: Option<String>,
     bus_name: String,
 }
 
@@ -90,6 +129,9 @@ struct PlayerctlViewConfig {
     no_player_text: String,
     hide_when_idle: bool,
     show_when_paused: bool,
+    controls_enabled: bool,
+    controls_open: PlayerctlControlsOpenMode,
+    controls_show_seek: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +162,9 @@ impl ModuleFactory for PlayerctlFactory {
             no_player_text: parsed.no_player_text,
             hide_when_idle: parsed.hide_when_idle,
             show_when_paused: parsed.show_when_paused,
+            controls_enabled: parsed.controls.enabled,
+            controls_open: parsed.controls.open,
+            controls_show_seek: parsed.controls.show_seek,
         };
 
         Ok(build_playerctl_module(view).upcast())
@@ -138,6 +183,10 @@ fn default_show_when_paused() -> bool {
     true
 }
 
+fn default_show_seek() -> bool {
+    true
+}
+
 pub(crate) fn parse_config(module: &ModuleConfig) -> Result<PlayerctlConfig, String> {
     if module.module_type != MODULE_TYPE {
         return Err(format!(
@@ -150,13 +199,48 @@ pub(crate) fn parse_config(module: &ModuleConfig) -> Result<PlayerctlConfig, Str
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-fn build_playerctl_module(config: PlayerctlViewConfig) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("playerctl");
+#[derive(Clone)]
+struct PlayerctlControlsUi {
+    popover: Popover,
+    previous_button: Button,
+    play_pause_button: Button,
+    next_button: Button,
+    seek_scale: Scale,
+    seek_widget: Widget,
+    seek_time_widget: Widget,
+    seek_position_label: Label,
+    seek_length_label: Label,
+    suppress_seek_callback: Arc<AtomicBool>,
+    seek_update_hold_until: Arc<std::sync::Mutex<Option<Instant>>>,
+    current_metadata: Arc<std::sync::Mutex<Option<PlayerctlMetadata>>>,
+    show_seek: bool,
+}
 
-    apply_css_classes(&label, config.class.as_deref());
-    attach_primary_click_command(&label, config.click_command.clone());
+fn build_playerctl_module(config: PlayerctlViewConfig) -> GtkBox {
+    let root = GtkBox::new(Orientation::Horizontal, 0);
+    root.add_css_class("module");
+    root.add_css_class("playerctl");
+    root.set_focusable(false);
+    root.set_focus_on_click(false);
+
+    apply_css_classes(&root, config.class.as_deref());
+
+    let label = Label::new(None);
+    label.set_xalign(0.0);
+    label.set_focusable(false);
+    root.append(&label);
+
+    if !config.controls_enabled {
+        attach_primary_click_command(&root, config.click_command.clone());
+    }
+
+    let controls_ui = if config.controls_enabled {
+        let controls_ui = build_controls_ui(&root, config.controls_show_seek);
+        install_controls_open_gesture(&root, &controls_ui.popover, config.controls_open);
+        Some(controls_ui)
+    } else {
+        None
+    };
 
     if config.interval_secs != DEFAULT_PLAYERCTL_INTERVAL_SECS {
         eprintln!(
@@ -172,37 +256,375 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Label {
     });
 
     glib::timeout_add_local(Duration::from_millis(200), {
+        let root = root.clone();
         let label = label.clone();
         let format = config.format.clone();
         let no_player_text = config.no_player_text.clone();
         let hide_when_idle = config.hide_when_idle;
         let show_when_paused = config.show_when_paused;
+        let controls_ui = controls_ui.clone();
         move || {
             while let Ok(update) = receiver.try_recv() {
                 let (text, visibility, state_class) = match update {
-                    BackendUpdate::Snapshot(Some(metadata)) => (
-                        render_format(&format, &metadata),
-                        should_show_metadata(Some(&metadata), hide_when_idle, show_when_paused),
-                        status_css_class(&metadata.status),
-                    ),
+                    BackendUpdate::Snapshot(Some(metadata)) => {
+                        if let Some(controls) = &controls_ui {
+                            refresh_controls_ui(controls, Some(&metadata));
+                        }
+                        (
+                            render_format(&format, &metadata),
+                            should_show_metadata(Some(&metadata), hide_when_idle, show_when_paused),
+                            status_css_class(&metadata.status),
+                        )
+                    }
                     BackendUpdate::Snapshot(None) => (
-                        no_player_text.clone(),
+                        {
+                            if let Some(controls) = &controls_ui {
+                                refresh_controls_ui(controls, None);
+                            }
+                            no_player_text.clone()
+                        },
                         should_show_metadata(None, hide_when_idle, show_when_paused),
                         "no-player",
                     ),
                     BackendUpdate::Error(err) => {
+                        if let Some(controls) = &controls_ui {
+                            refresh_controls_ui(controls, None);
+                        }
                         (format!("playerctl error: {err}"), true, "no-player")
                     }
                 };
                 label.set_text(&text);
-                label.set_visible(visibility);
-                apply_state_class(&label, state_class);
+                root.set_visible(visibility);
+                apply_state_class(&root, state_class);
             }
             ControlFlow::Continue
         }
     });
 
-    label
+    if let Some(controls) = controls_ui {
+        wire_controls_actions(controls);
+    }
+
+    root
+}
+
+fn build_controls_ui(root: &GtkBox, show_seek: bool) -> PlayerctlControlsUi {
+    root.add_css_class("clickable");
+    root.add_css_class("playerctl-controls-enabled");
+
+    let popover = Popover::new();
+    popover.add_css_class("playerctl-controls-popover");
+    popover.set_autohide(true);
+    popover.set_has_arrow(true);
+    popover.set_position(PositionType::Top);
+    popover.set_parent(root);
+
+    let content = GtkBox::new(Orientation::Vertical, 6);
+    content.add_css_class("playerctl-controls-content");
+    popover.set_child(Some(&content));
+
+    let buttons_row = GtkBox::new(Orientation::Horizontal, 6);
+    buttons_row.add_css_class("playerctl-controls-row");
+    content.append(&buttons_row);
+
+    let previous_button = Button::with_label("");
+    previous_button.add_css_class("playerctl-control-button");
+    buttons_row.append(&previous_button);
+
+    let play_pause_button = Button::with_label("");
+    play_pause_button.add_css_class("playerctl-control-button");
+    buttons_row.append(&play_pause_button);
+
+    let next_button = Button::with_label("");
+    next_button.add_css_class("playerctl-control-button");
+    buttons_row.append(&next_button);
+
+    let seek_scale = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.001);
+    seek_scale.add_css_class("playerctl-seek-scale");
+    seek_scale.set_draw_value(false);
+    seek_scale.set_hexpand(true);
+    seek_scale.set_sensitive(false);
+
+    let seek_widget: Widget = seek_scale.clone().upcast();
+    seek_widget.set_visible(show_seek);
+    content.append(&seek_widget);
+
+    let seek_time_row = GtkBox::new(Orientation::Horizontal, 8);
+    seek_time_row.add_css_class("playerctl-seek-time-row");
+    let seek_position_label = Label::new(Some("00:00"));
+    seek_position_label.add_css_class("playerctl-seek-time");
+    seek_position_label.set_xalign(0.0);
+    seek_position_label.set_hexpand(true);
+    seek_time_row.append(&seek_position_label);
+
+    let seek_length_label = Label::new(Some("00:00"));
+    seek_length_label.add_css_class("playerctl-seek-time");
+    seek_length_label.set_xalign(1.0);
+    seek_length_label.set_hexpand(true);
+    seek_time_row.append(&seek_length_label);
+
+    let seek_time_widget: Widget = seek_time_row.clone().upcast();
+    seek_time_widget.set_visible(show_seek);
+    content.append(&seek_time_widget);
+
+    let suppress_seek_callback = Arc::new(AtomicBool::new(false));
+    let seek_update_hold_until = Arc::new(std::sync::Mutex::new(None));
+    let current_metadata = Arc::new(std::sync::Mutex::new(None));
+
+    let press_gesture = GestureClick::builder().button(1).build();
+    {
+        let seek_update_hold_until = seek_update_hold_until.clone();
+        press_gesture.connect_pressed(move |_, _, _, _| {
+            if let Ok(mut slot) = seek_update_hold_until.lock() {
+                *slot = Some(Instant::now() + Duration::from_secs(2));
+            }
+        });
+    }
+    {
+        let seek_update_hold_until = seek_update_hold_until.clone();
+        press_gesture.connect_released(move |_, _, _, _| {
+            if let Ok(mut slot) = seek_update_hold_until.lock() {
+                *slot = Some(Instant::now() + Duration::from_millis(300));
+            }
+        });
+    }
+    seek_scale.add_controller(press_gesture);
+
+    PlayerctlControlsUi {
+        popover,
+        previous_button,
+        play_pause_button,
+        next_button,
+        seek_scale,
+        seek_widget,
+        seek_time_widget,
+        seek_position_label,
+        seek_length_label,
+        suppress_seek_callback,
+        seek_update_hold_until,
+        current_metadata,
+        show_seek,
+    }
+}
+
+fn install_controls_open_gesture(
+    root: &GtkBox,
+    popover: &Popover,
+    open_mode: PlayerctlControlsOpenMode,
+) {
+    match open_mode {
+        PlayerctlControlsOpenMode::LeftClick => {
+            let click = GestureClick::builder().button(1).build();
+            let popover = popover.clone();
+            click.connect_pressed(move |_, _, _, _| {
+                if popover.is_visible() {
+                    popover.popdown();
+                } else {
+                    popover.popup();
+                }
+            });
+            root.add_controller(click);
+        }
+    }
+}
+
+fn wire_controls_actions(controls_ui: PlayerctlControlsUi) {
+    let current_metadata_for_previous = controls_ui.current_metadata.clone();
+    controls_ui.previous_button.connect_clicked(move |_| {
+        let bus_name = current_metadata_for_previous
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|metadata| metadata.bus_name.clone()));
+        if let Some(bus_name) = bus_name {
+            std::thread::spawn(move || {
+                let _ = call_player_method(&bus_name, "Previous");
+            });
+        }
+    });
+
+    let current_metadata_for_play_pause = controls_ui.current_metadata.clone();
+    controls_ui.play_pause_button.connect_clicked(move |_| {
+        let bus_name = current_metadata_for_play_pause
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|metadata| metadata.bus_name.clone()));
+        if let Some(bus_name) = bus_name {
+            std::thread::spawn(move || {
+                let _ = call_player_method(&bus_name, "PlayPause");
+            });
+        }
+    });
+
+    let current_metadata_for_next = controls_ui.current_metadata.clone();
+    controls_ui.next_button.connect_clicked(move |_| {
+        let bus_name = current_metadata_for_next
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|metadata| metadata.bus_name.clone()));
+        if let Some(bus_name) = bus_name {
+            std::thread::spawn(move || {
+                let _ = call_player_method(&bus_name, "Next");
+            });
+        }
+    });
+
+    let current_metadata_for_seek = controls_ui.current_metadata.clone();
+    let suppress_seek_callback = controls_ui.suppress_seek_callback.clone();
+    let seek_update_hold_until = controls_ui.seek_update_hold_until.clone();
+    controls_ui.seek_scale.connect_value_changed(move |scale| {
+        if suppress_seek_callback.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Ok(mut slot) = seek_update_hold_until.lock() {
+            *slot = Some(Instant::now() + Duration::from_millis(700));
+        }
+
+        let Some(metadata) = current_metadata_for_seek
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+        else {
+            return;
+        };
+
+        let Some(duration_micros) = metadata.length_micros else {
+            return;
+        };
+        if duration_micros <= 0 || !metadata.can_seek {
+            return;
+        }
+
+        let Some(track_id) = metadata.track_id.clone() else {
+            return;
+        };
+
+        let ratio = scale.value().clamp(0.0, 1.0);
+        let target_position = ((duration_micros as f64) * ratio).round() as i64;
+        let bus_name = metadata.bus_name;
+
+        std::thread::spawn(move || {
+            let _ = call_set_position(&bus_name, &track_id, target_position);
+        });
+    });
+}
+
+fn refresh_controls_ui(controls_ui: &PlayerctlControlsUi, metadata: Option<&PlayerctlMetadata>) {
+    if let Ok(mut slot) = controls_ui.current_metadata.lock() {
+        *slot = metadata.cloned();
+    }
+
+    let Some(metadata) = metadata else {
+        controls_ui.previous_button.set_sensitive(false);
+        controls_ui.play_pause_button.set_sensitive(false);
+        controls_ui.play_pause_button.set_label("");
+        controls_ui.next_button.set_sensitive(false);
+        controls_ui.seek_scale.set_sensitive(false);
+        controls_ui.seek_widget.set_visible(controls_ui.show_seek);
+        controls_ui
+            .seek_time_widget
+            .set_visible(controls_ui.show_seek);
+        controls_ui.seek_position_label.set_text("00:00");
+        controls_ui.seek_length_label.set_text("00:00");
+        return;
+    };
+
+    controls_ui
+        .previous_button
+        .set_sensitive(metadata.can_go_previous);
+    controls_ui.next_button.set_sensitive(metadata.can_go_next);
+
+    let can_toggle_playback = metadata.can_play || metadata.can_pause;
+    controls_ui
+        .play_pause_button
+        .set_sensitive(can_toggle_playback);
+    let toggle_icon = if metadata.status == "playing" {
+        ""
+    } else {
+        ""
+    };
+    controls_ui.play_pause_button.set_label(toggle_icon);
+
+    let can_seek = metadata.can_seek
+        && metadata.length_micros.is_some_and(|length| length > 0)
+        && metadata.track_id.is_some();
+    controls_ui.seek_widget.set_visible(controls_ui.show_seek);
+    controls_ui
+        .seek_time_widget
+        .set_visible(controls_ui.show_seek);
+    controls_ui.seek_scale.set_sensitive(can_seek);
+
+    if let Ok(mut slot) = controls_ui.seek_update_hold_until.lock() {
+        if slot.is_some_and(|until| Instant::now() < until) {
+            controls_ui
+                .seek_position_label
+                .set_text(&format_timestamp_micros(metadata.position_micros));
+            controls_ui
+                .seek_length_label
+                .set_text(&format_timestamp_micros(metadata.length_micros));
+            return;
+        }
+        *slot = None;
+    }
+
+    let ratio = metadata_seek_ratio(metadata).unwrap_or(0.0).clamp(0.0, 1.0);
+    controls_ui
+        .suppress_seek_callback
+        .store(true, Ordering::Relaxed);
+    controls_ui.seek_scale.set_value(ratio);
+    controls_ui
+        .suppress_seek_callback
+        .store(false, Ordering::Relaxed);
+
+    controls_ui
+        .seek_position_label
+        .set_text(&format_timestamp_micros(metadata.position_micros));
+    controls_ui
+        .seek_length_label
+        .set_text(&format_timestamp_micros(metadata.length_micros));
+}
+
+fn metadata_seek_ratio(metadata: &PlayerctlMetadata) -> Option<f64> {
+    let position = metadata.position_micros?;
+    let length = metadata.length_micros?;
+    if length <= 0 {
+        return None;
+    }
+
+    Some(position as f64 / length as f64)
+}
+
+fn format_timestamp_micros(value: Option<i64>) -> String {
+    let Some(micros) = value else {
+        return "00:00".to_string();
+    };
+    let total_seconds = (micros.max(0) / 1_000_000) as u64;
+    let minutes = total_seconds / 60;
+    let seconds = total_seconds % 60;
+    format!("{minutes:02}:{seconds:02}")
+}
+
+fn call_player_method(bus_name: &str, method: &str) -> Result<(), String> {
+    let connection =
+        Connection::session().map_err(|err| format!("failed to connect to D-Bus: {err}"))?;
+    let proxy = Proxy::new(&connection, bus_name, MPRIS_PATH, MPRIS_PLAYER_INTERFACE)
+        .map_err(|err| format!("failed to create player proxy for {bus_name}: {err}"))?;
+    proxy
+        .call_method(method, &())
+        .map_err(|err| format!("failed to call {method} on {bus_name}: {err}"))?;
+    Ok(())
+}
+
+fn call_set_position(bus_name: &str, track_id: &str, position_micros: i64) -> Result<(), String> {
+    let connection =
+        Connection::session().map_err(|err| format!("failed to connect to D-Bus: {err}"))?;
+    let proxy = Proxy::new(&connection, bus_name, MPRIS_PATH, MPRIS_PLAYER_INTERFACE)
+        .map_err(|err| format!("failed to create player proxy for {bus_name}: {err}"))?;
+    let track_path = ObjectPath::try_from(track_id)
+        .map_err(|err| format!("failed to parse track id '{track_id}' as object path: {err}"))?;
+    proxy
+        .call_method("SetPosition", &(track_path, position_micros))
+        .map_err(|err| format!("failed to call SetPosition on {bus_name}: {err}"))?;
+    Ok(())
 }
 
 fn run_event_backend(ui_sender: Sender<BackendUpdate>, player_filter: Option<String>) {
@@ -214,7 +636,9 @@ fn run_event_backend(ui_sender: Sender<BackendUpdate>, player_filter: Option<Str
     // Prime with one initial snapshot.
     publish_snapshot(&ui_sender, player_filter.as_deref());
 
-    while trigger_rx.recv().is_ok() {
+    while let Ok(_) | Err(RecvTimeoutError::Timeout) =
+        trigger_rx.recv_timeout(Duration::from_millis(500))
+    {
         publish_snapshot(&ui_sender, player_filter.as_deref());
     }
 }
@@ -392,6 +816,7 @@ fn read_player_metadata(
         can_seek: player_proxy
             .get_property::<bool>("CanSeek")
             .unwrap_or(false),
+        track_id: metadata_object_path_string(&metadata, "mpris:trackid"),
         bus_name: bus_name.to_string(),
     })
 }
@@ -481,6 +906,17 @@ fn metadata_i64(metadata: &HashMap<String, OwnedValue>, key: &str) -> Option<i64
         .or_else(|| u32::try_from(value).ok().map(i64::from))
 }
 
+fn metadata_object_path_string(
+    metadata: &HashMap<String, OwnedValue>,
+    key: &str,
+) -> Option<String> {
+    let value = metadata.get(key)?.try_clone().ok()?;
+    ObjectPath::try_from(value)
+        .ok()
+        .map(|path| path.to_string())
+        .filter(|path| !path.is_empty())
+}
+
 fn render_format(format: &str, metadata: &PlayerctlMetadata) -> String {
     format
         .replace("{status}", &metadata.status)
@@ -520,16 +956,16 @@ fn status_css_class(status: &str) -> &'static str {
     }
 }
 
-fn apply_state_class(label: &Label, active_class: &str) {
+fn apply_state_class(widget: &impl IsA<Widget>, active_class: &str) {
     for class_name in PLAYERCTL_STATE_CLASSES {
-        label.remove_css_class(class_name);
+        widget.remove_css_class(class_name);
     }
-    label.add_css_class(active_class);
+    widget.add_css_class(active_class);
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::Map;
+    use serde_json::{json, Map};
 
     use super::*;
 
@@ -573,6 +1009,7 @@ mod tests {
                 can_play: false,
                 can_pause: false,
                 can_seek: false,
+                track_id: None,
                 bus_name: "org.mpris.MediaPlayer2.vlc".to_string(),
             },
             PlayerctlMetadata {
@@ -589,6 +1026,7 @@ mod tests {
                 can_play: false,
                 can_pause: false,
                 can_seek: false,
+                track_id: None,
                 bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
             },
         ])
@@ -614,6 +1052,7 @@ mod tests {
             can_play: false,
             can_pause: false,
             can_seek: false,
+            track_id: None,
             bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
         };
 
@@ -634,6 +1073,42 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_applies_controls_defaults() {
+        let module = ModuleConfig::new(MODULE_TYPE, Map::new());
+        let cfg = parse_config(&module).expect("config should parse");
+
+        assert!(!cfg.controls.enabled);
+        assert!(cfg.controls.show_seek);
+        assert!(matches!(
+            cfg.controls.open,
+            PlayerctlControlsOpenMode::LeftClick
+        ));
+    }
+
+    #[test]
+    fn parse_config_supports_controls_keys() {
+        let module = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "controls": {
+                    "enabled": true,
+                    "open": "left-click",
+                    "show_seek": false
+                }
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let cfg = parse_config(&module).expect("config should parse");
+
+        assert!(cfg.controls.enabled);
+        assert!(matches!(
+            cfg.controls.open,
+            PlayerctlControlsOpenMode::LeftClick
+        ));
+        assert!(!cfg.controls.show_seek);
+    }
+
+    #[test]
     fn should_show_metadata_respects_visibility_settings() {
         let playing = PlayerctlMetadata {
             status: "playing".to_string(),
@@ -649,6 +1124,7 @@ mod tests {
             can_play: false,
             can_pause: false,
             can_seek: false,
+            track_id: None,
             bus_name: String::new(),
         };
         let paused = PlayerctlMetadata {

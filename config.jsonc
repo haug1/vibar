@@ -18,7 +18,11 @@
       {
         "type": "playerctl",
         "format": "{status_icon} {artist} - {title}",
-        "click": "playerctl play-pause",
+        "controls": {
+          "enabled": true,
+          "open": "left-click",
+          "show_seek": true,
+        },
         "class": "v-pill",
         "hide-when-idle": true,
         "show-when-paused": false,

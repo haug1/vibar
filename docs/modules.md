@@ -49,7 +49,7 @@ Common layout selectors:
 - `.center`
 - `.right`
 - `.module` (base module label styling and default opacity)
-- `.module.clickable` (applied when a label-backed module has click actions; interaction state only)
+- `.module.clickable` (applied when a module has left-click actions; interaction state only)
 
 Built-in utility classes (optional):
 
@@ -171,7 +171,11 @@ Schema:
   "no_player_text": "No media",
   "hide-when-idle": true,
   "show-when-paused": true,
-  "click": "playerctl play-pause",
+  "controls": {
+    "enabled": true,
+    "open": "left-click",
+    "show_seek": true
+  },
   "class": "optional-css-classes"
 }
 ```
@@ -192,7 +196,15 @@ Fields:
   - Default: `true`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
-- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+- `controls` (optional): popover controls UI configuration.
+  - `enabled` (optional): enable left-click popover controls (`Previous`, `PlayPause`, `Next`).
+    - Default: `false`
+  - `open` (optional): trigger mode for opening controls popover.
+    - Supported values: `left-click`
+    - Default: `left-click`
+  - `show_seek` (optional): show/hide seek slider in the controls popover.
+    - Default: `true`
+- `class` (optional): extra CSS class(es) on the module widget (whitespace-separated).
 
 Format placeholders:
 
@@ -208,6 +220,10 @@ Behavior:
 - Event-driven updates from MPRIS over DBus (`NameOwnerChanged` + `PropertiesChanged`).
 - Active player selection policy: `playing` > `paused` > `stopped`, then stable bus-name sort.
 - If no matching player exists, module text falls back to `no_player_text`.
+- When `controls.enabled=true`, left-click opens a popover with transport buttons and optional seek slider.
+- Seek writes use MPRIS `SetPosition` (guarded by `CanSeek`, track id presence, and positive duration).
+- Slider updates ignore backend refresh while scrubbing to avoid seek feedback loops.
+- When `controls.enabled=false`, click behavior remains legacy (`click` / `on-click` command).
 - Status icon defaults:
   - `playing` -> ``
   - `paused` -> ``
@@ -218,7 +234,8 @@ Styling:
 
 - Label classes: `.module.playerctl`
 - State classes: `.status-playing`, `.status-paused`, `.status-stopped`, `.no-player`
-- Click-enabled labels also include: `.clickable`
+- Click-enabled modules include: `.clickable` (both shell-click and controls-enabled cases)
+- Controls popover classes: `.playerctl-controls-popover`, `.playerctl-controls-content`, `.playerctl-controls-row`, `.playerctl-control-button`, `.playerctl-seek-scale`
 - Optional extra class via `class` field.
 
 ## `exec`
