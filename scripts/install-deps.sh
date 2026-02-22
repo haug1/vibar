@@ -19,12 +19,14 @@ install_arch() {
     base-devel \
     pkgconf \
     gtk4 \
+    gtk4-layer-shell \
     wayland \
     wayland-protocols \
     rustup
 }
 
 install_debian() {
+  # No idea if this works
   ${SUDO} apt update
   ${SUDO} apt install -y \
     build-essential \
