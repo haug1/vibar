@@ -186,6 +186,15 @@
   min-width: 160px;
 }
 
+.playerctl-seek-time-row {
+  opacity: 0.86;
+}
+
+.playerctl-seek-time {
+  color: #d7e6fd;
+  font-size: 11px;
+}
+
 /* Tray */
 .tray-item {
   background: rgba(166, 194, 236, 0.1);

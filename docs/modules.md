@@ -223,6 +223,7 @@ Behavior:
 - When `controls.enabled=true`, left-click opens a popover with transport buttons and optional seek slider.
 - Seek writes use MPRIS `SetPosition` (guarded by `CanSeek`, track id presence, and positive duration).
 - Slider updates ignore backend refresh while scrubbing to avoid seek feedback loops.
+- Controls popover seek UI includes `MM:ss` progress labels (current position left, total length right).
 - When `controls.enabled=false`, click behavior remains legacy (`click` / `on-click` command).
 - Status icon defaults:
   - `playing` -> ``
@@ -235,7 +236,7 @@ Styling:
 - Label classes: `.module.playerctl`
 - State classes: `.status-playing`, `.status-paused`, `.status-stopped`, `.no-player`
 - Click-enabled modules include: `.clickable` (both shell-click and controls-enabled cases)
-- Controls popover classes: `.playerctl-controls-popover`, `.playerctl-controls-content`, `.playerctl-controls-row`, `.playerctl-control-button`, `.playerctl-seek-scale`
+- Controls popover classes: `.playerctl-controls-popover`, `.playerctl-controls-content`, `.playerctl-controls-row`, `.playerctl-control-button`, `.playerctl-seek-scale`, `.playerctl-seek-time-row`, `.playerctl-seek-time`
 - Optional extra class via `class` field.
 
 ## `exec`

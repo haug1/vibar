@@ -1110,6 +1110,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_supports_controls_aliases() {
+        let module = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "controls": {
+                    "enabled": true,
+                    "open": "left_click",
+                    "show-seek": false
+                }
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let cfg = parse_config(&module).expect("config should parse");
+
+        assert!(cfg.controls.enabled);
+        assert!(matches!(
+            cfg.controls.open,
+            PlayerctlControlsOpenMode::LeftClick
+        ));
+        assert!(!cfg.controls.show_seek);
+    }
+
+    #[test]
     fn should_show_metadata_respects_visibility_settings() {
         let playing = PlayerctlMetadata {
             status: "playing".to_string(),
@@ -1151,5 +1174,47 @@ mod tests {
         assert_eq!(status_css_class("paused"), "status-paused");
         assert_eq!(status_css_class("stopped"), "status-stopped");
         assert_eq!(status_css_class("unknown"), "no-player");
+    }
+
+    #[test]
+    fn metadata_seek_ratio_handles_expected_cases() {
+        let metadata = PlayerctlMetadata {
+            status: "playing".to_string(),
+            status_icon: "",
+            player: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            title: String::new(),
+            position_micros: Some(30_000_000),
+            length_micros: Some(120_000_000),
+            can_go_previous: false,
+            can_go_next: false,
+            can_play: false,
+            can_pause: false,
+            can_seek: true,
+            track_id: Some("/org/mpris/MediaPlayer2/track/1".to_string()),
+            bus_name: String::new(),
+        };
+        assert_eq!(metadata_seek_ratio(&metadata), Some(0.25));
+
+        let zero_length = PlayerctlMetadata {
+            length_micros: Some(0),
+            ..metadata.clone()
+        };
+        assert_eq!(metadata_seek_ratio(&zero_length), None);
+
+        let missing_position = PlayerctlMetadata {
+            position_micros: None,
+            ..metadata
+        };
+        assert_eq!(metadata_seek_ratio(&missing_position), None);
+    }
+
+    #[test]
+    fn format_timestamp_micros_formats_mm_ss() {
+        assert_eq!(format_timestamp_micros(None), "00:00");
+        assert_eq!(format_timestamp_micros(Some(-5)), "00:00");
+        assert_eq!(format_timestamp_micros(Some(5_000_000)), "00:05");
+        assert_eq!(format_timestamp_micros(Some(65_000_000)), "01:05");
     }
 }

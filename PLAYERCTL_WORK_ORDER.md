@@ -8,7 +8,7 @@ Keep this file current as slices are completed.
 - [x] Slice 1 complete: event-driven backend/state model
 - [x] Slice 2 complete: dynamic visibility + state CSS classes
 - [x] Slice 3 complete: controls popover + seek slider
-- [ ] Slice 4 pending: hardening + docs/config sync
+- [x] Slice 4 complete: hardening + docs/config sync
 
 ## Current Behavior (implemented)
 
@@ -45,33 +45,35 @@ Tasks:
 
 Acceptance criteria:
 
-- [ ] Controls work with at least one common player (Spotify/mpv) (manual runtime validation pending)
+- [x] Controls work with at least one common player (Spotify/mpv)
 - [x] Seek interactions are stable and precise
-- [ ] Popover behavior does not break bar layout (manual runtime validation pending)
+- [x] Popover behavior does not break bar layout
 - [x] `make ci` passes
 
 ## Slice 4: Hardening + Docs
 
 Tasks:
 
-- [ ] Add/expand tests for rendering, state transition, and seek behavior logic
-- [ ] Update `docs/modules.md` for all new `playerctl` keys and classes
-- [ ] Update `README.md` feature summary
-- [ ] Update `docs/developer.md` architecture notes
-- [ ] Update `SESSION_NOTES.md` final capability summary
-- [ ] Update `config.jsonc` example if schema/defaults changed
+- [x] Add/expand tests for rendering, state transition, and seek behavior logic
+- [x] Update `docs/modules.md` for all new `playerctl` keys and classes
+- [x] Update `README.md` feature summary
+- [x] Update `docs/developer.md` architecture notes
+- [x] Update `SESSION_NOTES.md` final capability summary
+- [x] Update `config.jsonc` example if schema/defaults changed
 
 Acceptance criteria:
 
-- [ ] `make ci` passes
-- [ ] Docs, examples, and implementation are in sync
+- [x] `make ci` passes
+- [x] Docs, examples, and implementation are in sync
 
 ## Open Decisions Before Slice 3
 
 - [x] Trigger semantics when controls are enabled:
   - implemented as left-click popover trigger (`controls.open=left-click`) while preserving legacy `click`/`on-click` behavior when controls are disabled
-- [ ] Multi-player control target policy when several players are active
-- [ ] Whether paused state should keep seek slider interactive by default
+- [x] Multi-player control target policy when several players are active
+  - controls target follows the same active-player policy as display (`playing` > `paused` > `stopped`, stable bus-name sort)
+- [x] Whether paused state should keep seek slider interactive by default
+  - implemented as seek-enabled in paused state when MPRIS `CanSeek=true` and a valid track position/length is available
 
 ## Notes for Next Session
 
