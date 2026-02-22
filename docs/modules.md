@@ -49,7 +49,12 @@ Common layout selectors:
 - `.center`
 - `.right`
 - `.module` (base module label styling and default opacity)
-- `.module.clickable` (applied when a label-backed module has click actions)
+- `.module.clickable` (applied when a label-backed module has click actions; interaction state only)
+
+Built-in utility classes (optional):
+
+- `.v-pill`: applies pill-style module chrome (background, border, radius, padding).
+- `.v-square`: same chrome style with square corners (`border-radius: 0`).
 
 ## `group`
 

@@ -18,15 +18,34 @@
       {
         "type": "playerctl",
         "format": "{status_icon} {artist} - {title}",
+        "click": "playerctl play-pause",
+        "class": "v-pill",
         "hide-when-idle": true,
+        "show-when-paused": false,
       },
-      { "type": "pulseaudio", "click": "pavucontrol" },
-      { "type": "disk", "format": "{free} \uf0a0 ", "click": "xdg-open $HOME" },
-      { "type": "cpu", "format": "{used_percentage}% ", "interval_secs": 1 },
-      { "type": "memory", "format": "{used_percentage}% \uf2db " },
+      // Utility class example:
+      // - v-square: square module chrome
+      // - v-pill: rounded module chrome
+      {
+        "type": "cpu",
+        "class": "v-square",
+        "format": "{used_percentage}% ",
+        "interval_secs": 1,
+      },
+      {
+        "type": "memory",
+        "class": "v-square",
+        "format": "{used_percentage}% \uf2db",
+      },
+      { "type": "pulseaudio", "click": "pavucontrol", "class": "v-square" },
+      {
+        "type": "disk",
+        "format": "{free} \uf0a0",
+        "click": "xdg-open $HOME",
+        "class": "v-square",
+      },
       {
         "type": "group",
-        "class": "tray-group",
         "drawer": true,
         "modules": [
           { "type": "tray", "icon_size": 16, "poll_interval_secs": 2 },

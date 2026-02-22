@@ -30,6 +30,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Memory module supports optional `click` / `on-click` shell actions, polling interval, and format placeholders (`{used_percentage}`, `{used}`, `{available}`, `{free}`, `{total}`)
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
+- Default CSS includes utility classes for module chrome variants (`v-pill` rounded, `v-square` square)
 - Shared helper `modules::attach_primary_click_command(...)` centralizes click-command wiring and `.clickable` CSS class behavior across modules
 - `VIBAR_DEBUG_DOM=1` prints widget tree + CSS classes at startup and periodically (default 10s); interval override via `VIBAR_DEBUG_DOM_INTERVAL_SECS`
 

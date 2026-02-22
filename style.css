@@ -26,13 +26,15 @@
 
 .module {
   color: #dce5f6;
-  opacity: 0.88;
+  opacity: 0.9;
 }
 
+/* Shared interaction transitions */
 .menu-button,
 .tray-item,
 .tray-menu-item,
-.module.clickable {
+.module.clickable,
+.group-toggle > button {
   transition:
     background-color 140ms ease,
     border-color 140ms ease,
@@ -40,13 +42,38 @@
     opacity 140ms ease;
 }
 
-.workspaces {
+/* Utility classes for quick module chrome from config.jsonc */
+.v-square,
+.v-pill {
+  background: rgba(146, 177, 222, 0.12);
+  border: 1px solid rgba(176, 206, 245, 0.22);
+  padding: 2px 8px;
 }
 
+.v-square {
+  border-radius: 0;
+}
+
+.v-pill {
+  border-radius: 8px;
+}
+
+/* Clickable modules use square chrome by default */
+.module.clickable {
+  opacity: 0.92;
+}
+
+.module.clickable:hover {
+  background: rgba(121, 182, 255, 0.18);
+  color: #f8fbff;
+  opacity: 1;
+}
+
+/* Workspaces */
 .menu-button {
   background: rgba(166, 194, 236, 0.12);
   border: 1px solid rgba(176, 204, 242, 0.36);
-  border-radius: 8px;
+  border-radius: 0;
   color: #dae7fd;
   font-weight: 600;
   min-width: 28px;
@@ -75,21 +102,7 @@
   box-shadow: none;
 }
 
-.module.clickable,
-.v-mod {
-  background: rgba(146, 177, 222, 0.12);
-  border: 1px solid rgba(176, 206, 245, 0.22);
-  border-radius: 8px;
-  padding: 2px 8px;
-}
-
-.module.clickable:hover {
-  background: rgba(121, 182, 255, 0.24);
-  border-color: rgba(156, 214, 255, 0.54);
-  color: #f8fbff;
-  opacity: 1;
-}
-
+/* Group drawer toggle */
 .group-toggle {
   padding: 0;
 }
@@ -97,9 +110,9 @@
 .group-toggle > button {
   background: rgba(146, 177, 222, 0.12);
   border: 1px solid rgba(176, 206, 245, 0.22);
-  border-radius: 8px;
+  border-radius: 0;
   color: #dce5f6;
-  opacity: 0.88;
+  opacity: 0.9;
   padding: 2px 8px;
 }
 
@@ -111,6 +124,7 @@
   opacity: 1;
 }
 
+/* Common module text emphasis */
 .clock,
 .playerctl,
 .exec {
@@ -124,13 +138,21 @@
   background: rgba(255, 84, 84, 0.25);
 }
 
-.tray {
+.playerctl.status-playing {
+  opacity: 1;
 }
 
+.playerctl.status-paused,
+.playerctl.status-stopped,
+.playerctl.no-player {
+  opacity: 0.85;
+}
+
+/* Tray */
 .tray-item {
   background: rgba(166, 194, 236, 0.1);
   border: 1px solid rgba(176, 204, 242, 0.28);
-  border-radius: 8px;
+  border-radius: 0;
   min-width: 24px;
   min-height: 24px;
   opacity: 0.94;
@@ -150,13 +172,13 @@
 .tray-menu-popover contents {
   background: rgba(16, 19, 25, 0.95);
   border: 1px solid rgba(179, 205, 240, 0.24);
-  border-radius: 10px;
+  border-radius: 0;
   color: #e3ecfd;
   padding: 5px;
 }
 
 .tray-menu-item {
-  border-radius: 7px;
+  border-radius: 0;
   min-height: 26px;
   opacity: 0.95;
   padding: 4px 8px;

@@ -62,6 +62,7 @@ make ci
   - embedded default `style.css`
   - optional user CSS loaded on top
   - default CSS can be disabled via config flag
+  - built-in utility classes for module chrome (`v-pill`, `v-square`)
 
 ## Configuration And Styling
 
