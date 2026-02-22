@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: fedora:41
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -C debuginfo=0
 
     steps:
       - name: Checkout
@@ -30,6 +33,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       - name: make ci
         run: make ci
