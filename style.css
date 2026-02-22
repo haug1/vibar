@@ -170,17 +170,18 @@
 }
 
 .tray-menu-popover contents {
-  background: rgba(16, 19, 25, 0.95);
-  border: 1px solid rgba(179, 205, 240, 0.24);
+  background: transparent;
+  border-width: 0;
   border-radius: 0;
   color: #e3ecfd;
   padding: 5px;
 }
 
 .tray-menu-item {
+  background: rgba(14, 18, 24, 0.8);
   border-radius: 0;
   min-height: 26px;
-  opacity: 0.95;
+  opacity: 1;
   padding: 4px 8px;
 }
 
@@ -189,7 +190,7 @@
 }
 
 .tray-menu-item:hover {
-  background: rgba(126, 181, 249, 0.22);
+  background: rgba(83, 132, 196, 0.8);
   color: #f7fbff;
   opacity: 1;
 }
