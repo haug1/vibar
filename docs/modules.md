@@ -431,6 +431,7 @@ Behavior:
 - Left click triggers SNI `Activate`.
 - Right click requests SNI menu and renders DBusMenu in GTK popover.
 - Middle click triggers SNI `SecondaryActivate`.
+- Toggleable DBusMenu entries (`toggle-type`/`toggle-state`) render with check/radio indicators.
 - Icon lookup prefers theme icon names, then pixmap fallbacks.
 
 Styling:

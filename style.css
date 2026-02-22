@@ -184,6 +184,10 @@
   padding: 4px 8px;
 }
 
+.tray-menu-toggle {
+  min-width: 14px;
+}
+
 .tray-menu-item:hover {
   background: rgba(126, 181, 249, 0.22);
   color: #f7fbff;

@@ -9,7 +9,7 @@ use gtk::{
 };
 
 use super::menu_dbus::{fetch_dbus_menu_model, send_menu_event};
-use super::types::{TrayMenuEntry, DEFAULT_ICON_SIZE};
+use super::types::{TrayMenuEntry, TrayMenuToggleState, TrayMenuToggleType, DEFAULT_ICON_SIZE};
 
 pub(super) fn show_item_menu(anchor: &Button, destination: String, path: String) -> bool {
     let Some(model) = fetch_dbus_menu_model(&destination, &path) else {
@@ -187,6 +187,9 @@ fn render_menu_level(
         button.set_sensitive(entry.enabled);
 
         let row = GtkBox::new(Orientation::Horizontal, 8);
+        if let Some(toggle) = toggle_indicator(&entry) {
+            row.append(&toggle);
+        }
         if let Some(icon) = entry
             .icon_name
             .as_deref()
@@ -236,4 +239,20 @@ fn render_menu_level(
         container.append(&button);
         previous_was_separator = false;
     }
+}
+
+fn toggle_indicator(entry: &TrayMenuEntry) -> Option<Label> {
+    let glyph = match (&entry.toggle_type, &entry.toggle_state) {
+        (Some(TrayMenuToggleType::Checkmark), TrayMenuToggleState::On) => "☑",
+        (Some(TrayMenuToggleType::Checkmark), TrayMenuToggleState::Off) => "☐",
+        (Some(TrayMenuToggleType::Checkmark), TrayMenuToggleState::Indeterminate) => "◪",
+        (Some(TrayMenuToggleType::Radio), TrayMenuToggleState::On) => "◉",
+        (Some(TrayMenuToggleType::Radio), TrayMenuToggleState::Off) => "◯",
+        (Some(TrayMenuToggleType::Radio), TrayMenuToggleState::Indeterminate) => "◍",
+        (None, _) => return None,
+    };
+
+    let indicator = Label::new(Some(glyph));
+    indicator.add_css_class("tray-menu-toggle");
+    Some(indicator)
 }

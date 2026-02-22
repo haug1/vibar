@@ -6,7 +6,8 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use zbus::Result as ZbusResult;
 
 use super::types::{
-    TrayMenuEntry, TrayMenuLayout, TrayMenuModel, DBUS_MENU_INTERFACE, ITEM_INTERFACE,
+    TrayMenuEntry, TrayMenuLayout, TrayMenuModel, TrayMenuToggleState, TrayMenuToggleType,
+    DBUS_MENU_INTERFACE, ITEM_INTERFACE,
 };
 
 pub(super) fn fetch_dbus_menu_model(destination: &str, item_path: &str) -> Option<TrayMenuModel> {
@@ -68,6 +69,8 @@ fn parse_menu_entry_node(value: OwnedValue) -> Option<TrayMenuEntry> {
     let label = read_menu_label(&props);
     let icon_name = read_string_prop(&props, "icon-name").filter(|value| !value.is_empty());
     let icon_data = read_bytes_prop(&props, "icon-data").filter(|value| !value.is_empty());
+    let toggle_type = parse_toggle_type(&props);
+    let toggle_state = parse_toggle_state(&props);
     let enabled = read_bool_prop(&props, "enabled").unwrap_or(true);
     let visible = read_bool_prop(&props, "visible").unwrap_or(true);
     let is_separator = read_string_prop(&props, "type")
@@ -84,6 +87,8 @@ fn parse_menu_entry_node(value: OwnedValue) -> Option<TrayMenuEntry> {
         label,
         icon_name,
         icon_data,
+        toggle_type,
+        toggle_state,
         enabled,
         visible,
         is_separator,
@@ -128,6 +133,42 @@ fn read_bytes_prop(props: &HashMap<String, OwnedValue>, key: &str) -> Option<Vec
         .and_then(|value| Vec::<u8>::try_from(value).ok())
 }
 
+fn read_i32_prop(props: &HashMap<String, OwnedValue>, key: &str) -> Option<i32> {
+    let value = props.get(key)?.try_clone().ok()?;
+
+    i32::try_from(value.try_clone().ok()?)
+        .ok()
+        .or_else(|| {
+            i64::try_from(value.try_clone().ok()?)
+                .ok()
+                .and_then(|v| i32::try_from(v).ok())
+        })
+        .or_else(|| {
+            u32::try_from(value)
+                .ok()
+                .and_then(|v| i32::try_from(v).ok())
+        })
+}
+
+fn parse_toggle_type(props: &HashMap<String, OwnedValue>) -> Option<TrayMenuToggleType> {
+    let toggle_type = read_string_prop(props, "toggle-type")?;
+    if toggle_type.eq_ignore_ascii_case("checkmark") {
+        return Some(TrayMenuToggleType::Checkmark);
+    }
+    if toggle_type.eq_ignore_ascii_case("radio") {
+        return Some(TrayMenuToggleType::Radio);
+    }
+    None
+}
+
+fn parse_toggle_state(props: &HashMap<String, OwnedValue>) -> TrayMenuToggleState {
+    match read_i32_prop(props, "toggle-state").unwrap_or(0) {
+        1 => TrayMenuToggleState::On,
+        -1 => TrayMenuToggleState::Indeterminate,
+        _ => TrayMenuToggleState::Off,
+    }
+}
+
 pub(super) fn send_menu_event(destination: String, menu_path: String, item_id: i32) {
     thread::spawn(move || {
         let Ok(connection) = Connection::session() else {
@@ -152,4 +193,63 @@ pub(super) fn send_menu_event(destination: String, menu_path: String, item_id: i
             ),
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use zbus::zvariant::{OwnedValue, Value};
+
+    use super::{parse_toggle_state, parse_toggle_type};
+    use crate::modules::tray::types::{TrayMenuToggleState, TrayMenuToggleType};
+
+    #[test]
+    fn parse_toggle_type_handles_checkmark_and_radio() {
+        let mut props = HashMap::<String, OwnedValue>::new();
+        props.insert(
+            "toggle-type".to_string(),
+            Value::from("checkmark")
+                .try_to_owned()
+                .expect("value should convert"),
+        );
+        assert!(matches!(
+            parse_toggle_type(&props),
+            Some(TrayMenuToggleType::Checkmark)
+        ));
+
+        props.insert(
+            "toggle-type".to_string(),
+            Value::from("radio")
+                .try_to_owned()
+                .expect("value should convert"),
+        );
+        assert!(matches!(
+            parse_toggle_type(&props),
+            Some(TrayMenuToggleType::Radio)
+        ));
+    }
+
+    #[test]
+    fn parse_toggle_state_handles_on_off_and_indeterminate() {
+        let mut props = HashMap::<String, OwnedValue>::new();
+
+        props.insert("toggle-state".to_string(), OwnedValue::from(1_i32));
+        assert!(matches!(
+            parse_toggle_state(&props),
+            TrayMenuToggleState::On
+        ));
+
+        props.insert("toggle-state".to_string(), OwnedValue::from(0_i32));
+        assert!(matches!(
+            parse_toggle_state(&props),
+            TrayMenuToggleState::Off
+        ));
+
+        props.insert("toggle-state".to_string(), OwnedValue::from(-1_i32));
+        assert!(matches!(
+            parse_toggle_state(&props),
+            TrayMenuToggleState::Indeterminate
+        ));
+    }
 }

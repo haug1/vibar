@@ -43,11 +43,26 @@ pub(super) struct TrayItemSnapshot {
 }
 
 #[derive(Debug, Clone)]
+pub(super) enum TrayMenuToggleType {
+    Checkmark,
+    Radio,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum TrayMenuToggleState {
+    Off,
+    On,
+    Indeterminate,
+}
+
+#[derive(Debug, Clone)]
 pub(super) struct TrayMenuEntry {
     pub(super) id: i32,
     pub(super) label: String,
     pub(super) icon_name: Option<String>,
     pub(super) icon_data: Option<Vec<u8>>,
+    pub(super) toggle_type: Option<TrayMenuToggleType>,
+    pub(super) toggle_state: TrayMenuToggleState,
     pub(super) enabled: bool,
     pub(super) visible: bool,
     pub(super) is_separator: bool,
