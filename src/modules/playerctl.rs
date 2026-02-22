@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{
-    Box as GtkBox, Button, GestureClick, Label, Orientation, Popover, PositionType, Scale, Widget,
+    Box as GtkBox, Button, GestureClick, Label, Orientation, Overlay, Popover, PositionType, Scale,
+    Widget,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -216,8 +217,8 @@ struct PlayerctlControlsUi {
     show_seek: bool,
 }
 
-fn build_playerctl_module(config: PlayerctlViewConfig) -> GtkBox {
-    let root = GtkBox::new(Orientation::Horizontal, 0);
+fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
+    let root = Overlay::new();
     root.add_css_class("module");
     root.add_css_class("playerctl");
     root.set_focusable(false);
@@ -228,7 +229,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> GtkBox {
     let label = Label::new(None);
     label.set_xalign(0.0);
     label.set_focusable(false);
-    root.append(&label);
+    root.set_child(Some(&label));
 
     if !config.controls_enabled {
         attach_primary_click_command(&root, config.click_command.clone());
@@ -308,7 +309,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> GtkBox {
     root
 }
 
-fn build_controls_ui(root: &GtkBox, show_seek: bool) -> PlayerctlControlsUi {
+fn build_controls_ui(root: &Overlay, show_seek: bool) -> PlayerctlControlsUi {
     root.add_css_class("clickable");
     root.add_css_class("playerctl-controls-enabled");
 
@@ -408,7 +409,7 @@ fn build_controls_ui(root: &GtkBox, show_seek: bool) -> PlayerctlControlsUi {
 }
 
 fn install_controls_open_gesture(
-    root: &GtkBox,
+    root: &Overlay,
     popover: &Popover,
     open_mode: PlayerctlControlsOpenMode,
 ) {
