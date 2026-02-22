@@ -9,7 +9,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Current status: project passes CI (`make ci`)
 - Primary runtime target: sway/Wayland
 - CI build environment: GitHub Actions Ubuntu runner with Fedora 41 container for consistent GTK4 layer-shell dev packages
-- CI runtime optimization: GitHub Actions uses `Swatinem/rust-cache` and `RUSTFLAGS=-C debuginfo=0` to reduce repeated Rust build time
+- CI runtime optimization: GitHub Actions uses `Swatinem/rust-cache`, `RUSTFLAGS=-C debuginfo=0`, and cached Fedora `dnf` package downloads to reduce repeated CI runtime
 
 ## Core Behavior
 
