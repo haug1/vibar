@@ -17,11 +17,14 @@
     "right": [
       { "type": "pulseaudio", "click": "pavucontrol" },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "xdg-open $HOME" },
+      { "type": "memory", "format": "{used_percentage}% \uf2db " },
       {
         "type": "group",
         "class": "tray-group",
         "drawer": true,
-        "modules": [{ "type": "tray", "icon_size": 16, "poll_interval_secs": 2 }],
+        "modules": [
+          { "type": "tray", "icon_size": 16, "poll_interval_secs": 2 },
+        ],
       },
       { "type": "clock", "format": "%a %d. %b %H:%M:%S" },
     ],

@@ -2,6 +2,7 @@ pub(crate) mod clock;
 pub(crate) mod disk;
 pub(crate) mod exec;
 pub(crate) mod group;
+pub(crate) mod memory;
 pub(crate) mod pulseaudio;
 pub(crate) mod sway;
 pub(crate) mod tray;
@@ -41,6 +42,7 @@ pub(crate) trait ModuleFactory {
 const FACTORIES: &[&dyn ModuleFactory] = &[
     &exec::FACTORY,
     &disk::FACTORY,
+    &memory::FACTORY,
     &group::FACTORY,
     &pulseaudio::FACTORY,
     &sway::workspaces::FACTORY,

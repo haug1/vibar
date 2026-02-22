@@ -50,6 +50,7 @@ make ci
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system
 - Exec module supports Waybar-compatible output parsing (i3blocks lines + JSON `text`/`class`)
+- Memory module with configurable polling interval and format placeholders (including `{used_percentage}`)
 - Group module for logical submodule grouping and optional drawer-style expansion
 - Native PulseAudio module with event-driven updates and scroll-step volume control
 - Config file search order:

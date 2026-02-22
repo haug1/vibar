@@ -23,6 +23,7 @@ Top-level config uses three layout areas:
         "modules": [{ "type": "pulseaudio" }, { "type": "tray" }]
       },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
+      { "type": "memory", "format": "{used_percentage} \uf2db " },
       { "type": "clock" }
     ]
   }
@@ -237,6 +238,52 @@ Behavior:
 Styling:
 
 - Label classes: `.module.disk`
+- Click-enabled labels also include: `.clickable`
+- Optional extra class via `class` field.
+
+## `memory`
+
+Schema:
+
+```json
+{
+  "type": "memory",
+  "format": "{used_percentage} \uf2db ",
+  "click": "optional shell command",
+  "interval_secs": 5,
+  "class": "optional-css-classes"
+}
+```
+
+Fields:
+
+- `format` (optional): output format template.
+  - Default: `{used_percentage}%`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
+- `interval_secs` (optional): polling interval in seconds.
+  - Default: `5`
+  - Minimum: `1` (values below are clamped)
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+
+Format placeholders:
+
+- `{used_percentage}`
+- `{free_percentage}`
+- `{available_percentage}`
+- `{used}`
+- `{free}`
+- `{available}`
+- `{total}`
+
+Behavior:
+
+- Polls `/proc/meminfo` and uses `MemTotal` / `MemAvailable`.
+- Byte values are rendered in binary units (`B`, `K`, `M`, `G`, `T`, `P`).
+
+Styling:
+
+- Label classes: `.module.memory`
 - Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 
