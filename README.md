@@ -48,49 +48,23 @@ make ci
 - Bottom-anchored layer-shell bar
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
-- Configurable module system
-- Playerctl module with event-driven MPRIS metadata/status, optional fixed-width clipping and configurable marquee modes (`off`/`hover`/`open`/`always`) for long text, optional idle auto-hide, and optional left-click controls popover (top centered transport controls, key/value metadata list, module-width popover with wrapped long values, seek, and progress timestamps)
-- Exec module supports Waybar-compatible output parsing (i3blocks lines + JSON `text`/`class`)
-- CPU module with configurable polling interval, format placeholders, and default usage-level CSS classes
-- Memory module with configurable polling interval and format placeholders (including `{used_percentage}`)
-- Group module for logical submodule grouping and optional drawer-style expansion
-- Native PulseAudio module with event-driven updates and scroll-step volume control
+- Configurable module system (`docs/modules.md`)
 - Config file search order:
   - `~/.config/vibar/config.jsonc`
   - `./config.jsonc` (fallback)
 - CSS layering support:
   - embedded default `style.css`
   - optional user CSS loaded on top
-  - default CSS can be disabled via config flag
-  - built-in utility classes for module chrome (`v-pill`, `v-square`)
+  - default CSS can be disabled via `style.load-default`
 
-## Configuration And Styling
+## Documentation
 
-Config is loaded in this order:
-
-1. `~/.config/vibar/config.jsonc`
-2. `./config.jsonc`
-
-If no candidate exists (or both are invalid), built-in defaults are used.
-
-Styling config supports:
-
-- loading embedded default `style.css` (`style.load-default`, default `true`)
-- loading a user CSS file (`style.path`) after default CSS for overrides
-- disabling embedded defaults and using only user CSS
-
-- Default example config: [`config.jsonc`](./config.jsonc)
-- Full module configuration and module-specific styling selectors:
-  - [`docs/modules.md`](./docs/modules.md)
-- Base stylesheet loaded by default:
-  - [`style.css`](./style.css)
-
-## Expanded Docs
-
+- User-facing setup and commands: `README.md`
+- Session continuity notes: `SESSION_NOTES.md`
 - Module configuration and styling selectors: [`docs/modules.md`](./docs/modules.md)
 - Developer architecture and extension notes: [`docs/developer.md`](./docs/developer.md)
-  - Includes debug env vars such as `VIBAR_DEBUG_DOM=1` for widget/CSS selector discovery.
-- Playerctl implementation is organized under [`src/modules/playerctl/`](./src/modules/playerctl/) with focused submodules (`config`, `backend`, `model`, `ui`).
+- Default example config: [`config.jsonc`](./config.jsonc)
+- Base stylesheet loaded by default: [`style.css`](./style.css)
 
 ## Acknowledgements
 

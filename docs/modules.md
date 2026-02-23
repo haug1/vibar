@@ -159,7 +159,6 @@ Behavior:
 Styling:
 
 - Label classes: `.module.clock`
-- Click-enabled labels also include: `.clickable`
 
 ## `playerctl`
 
@@ -228,7 +227,6 @@ Format placeholders:
 Behavior:
 
 - Event-driven updates from MPRIS over DBus (`NameOwnerChanged` + `PropertiesChanged`).
-- Internal implementation is split under `src/modules/playerctl/` by responsibility (`config`, `backend`, `model`, `ui`) to keep behavior-focused codepaths isolated.
 - Active player selection policy: `playing` > `paused` > `stopped`, then stable bus-name sort.
 - If no matching player exists, module text falls back to `no_player_text`.
 - With `fixed-width` set, the module keeps a bounded width.
@@ -254,7 +252,6 @@ Styling:
 - Label classes: `.module.playerctl`
 - State classes: `.status-playing`, `.status-paused`, `.status-stopped`, `.no-player`
 - Fixed-width carousel classes: `.playerctl-fixed-width`, `.playerctl-carousel`
-- Click-enabled modules include: `.clickable` (both shell-click and controls-enabled cases)
 - Controls popover classes: `.playerctl-controls-popover`, `.playerctl-controls-content`, `.playerctl-controls-row`, `.playerctl-control-button`, `.playerctl-controls-metadata-grid`, `.playerctl-controls-metadata-key`, `.playerctl-controls-metadata-value`, `.playerctl-seek-scale`, `.playerctl-seek-time-row`, `.playerctl-seek-time`
 - Optional extra class via `class` field.
 
@@ -294,7 +291,6 @@ Behavior:
 Styling:
 
 - Label classes: `.module.exec`
-- Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 
 ## `disk`
@@ -342,7 +338,6 @@ Behavior:
 Styling:
 
 - Label classes: `.module.disk`
-- Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 
 ## `memory`
@@ -388,7 +383,6 @@ Behavior:
 Styling:
 
 - Label classes: `.module.memory`
-- Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 
 ## `cpu`
@@ -436,7 +430,6 @@ Styling:
 
 - Label classes: `.module.cpu`
 - Dynamic usage classes: `.usage-low`, `.usage-medium`, `.usage-high`, `.usage-critical`, `.usage-unknown`
-- Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.
 
 ## `tray`
@@ -551,5 +544,4 @@ Behavior:
 Styling:
 
 - Label classes: `.module.pulseaudio`
-- Click-enabled labels also include: `.clickable`
 - Optional extra class via `class` field.

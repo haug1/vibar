@@ -9,7 +9,6 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Current status: project passes CI (`make ci`)
 - Primary runtime target: sway/Wayland
 - CI build environment: GitHub Actions Ubuntu runner with Fedora 41 container for consistent GTK4 layer-shell dev packages
-- CI runtime optimization: GitHub Actions uses `Swatinem/rust-cache`, `RUSTFLAGS=-C debuginfo=0`, and cached Fedora `dnf` package downloads to reduce repeated CI runtime
 
 ## Core Behavior
 
@@ -17,24 +16,10 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - One bar window per connected monitor at startup
 - Non-focusable bar windows (`KeyboardMode::None`, no focus-on-click)
 - 3 layout areas: `left`, `center`, `right`
-- Config-driven modules (current set documented in `docs/modules.md`)
-- Group module supports nested modules for shared styling and optional drawer reveal behavior
+- Config-driven module system (canonical reference: `docs/modules.md`)
 - Config lookup order: `~/.config/vibar/config.jsonc` then `./config.jsonc`
-- Sway workspace module (`sway/workspaces`) is output-local per monitor and event-driven via sway IPC
-- Clock module supports optional `click` / `on-click` shell actions
-- PulseAudio module supports click actions, Waybar-style format keys, scroll volume, and event-driven native `libpulse` updates
-- Playerctl module is event-driven via MPRIS DBus signals with lightweight periodic position refresh, supports placeholders (`{status}`, `{status_icon}`, `{player}`, `{artist}`, `{album}`, `{title}`), optional fixed-width clipping (`fixed-width`) with configurable marquee mode (`marquee`: `off|hover|open|always`, default `off`), dynamic state CSS classes (`status-playing|status-paused|status-stopped|no-player`), visibility controls (`hide-when-idle`, `show-when-paused`), and optional `controls` popover (top centered `Previous`/`PlayPause`/`Next`, two-column key/value metadata grid with styled keys, guarded precise seek via `SetPosition`, and `MM:ss` progress/length labels; hover tooltip suppressed while popover is open; popover width matches module width and wraps long metadata values)
-- Playerctl source is modularized under `src/modules/playerctl/` (`mod.rs` orchestrator + `config.rs`, `backend.rs`, `model.rs`, `ui.rs`) instead of a single large file
-- Tray context menu supports DBusMenu toggle indicators (check/radio states) via `toggle-type`/`toggle-state` metadata
-- Exec module supports optional `click` / `on-click` shell actions
-- Exec module parses Waybar-compatible output (`i3blocks` line format + JSON `text`/`class`) and applies dynamic CSS classes from output
-- CPU module supports optional `click` / `on-click` shell actions, polling interval, format placeholders (`{used_percentage}`, `{idle_percentage}`), and dynamic usage CSS classes (`usage-low|medium|high|critical|unknown`)
-- Memory module supports optional `click` / `on-click` shell actions, polling interval, and format placeholders (`{used_percentage}`, `{used}`, `{available}`, `{free}`, `{total}`)
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
-- Default CSS includes utility classes for module chrome variants (`v-pill` rounded, `v-square` square)
-- Shared helper `modules::attach_primary_click_command(...)` centralizes click-command wiring and `.clickable` CSS class behavior across modules
-- `VIBAR_DEBUG_DOM=1` prints widget tree + CSS classes at startup and periodically (default 10s); interval override via `VIBAR_DEBUG_DOM_INTERVAL_SECS`
 
 ## Standard Commands
 
@@ -52,6 +37,13 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Example config: `config.jsonc`
 - App entry: `src/main.rs`
 - Module registry and dispatch: `src/modules/mod.rs`
+
+## Troubleshooting Flags
+
+- `VIBAR_DEBUG_WORKSPACES=1`: log sway workspace refresh state
+- `VIBAR_DEBUG_TRAY=1`: log tray DBus click method calls/errors
+- `VIBAR_DEBUG_DOM=1`: print GTK widget tree + CSS classes at startup and periodically
+- `VIBAR_DEBUG_DOM_INTERVAL_SECS=<n>`: override DOM dump interval (minimum `1`, default `10`)
 
 ## Conventions
 
