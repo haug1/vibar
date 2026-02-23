@@ -240,7 +240,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
 
     let carousel = config.fixed_width.map(|fixed_width| {
         root.add_css_class("playerctl-fixed-width");
-        build_carousel_ui(&root, fixed_width)
+        build_carousel_ui(&root, fixed_width, config.class.as_deref())
     });
     if let Some(carousel) = &carousel {
         root.set_child(Some(&carousel.area));
@@ -356,7 +356,11 @@ fn normalize_fixed_width(value: u32) -> Option<u32> {
     Some(value)
 }
 
-fn build_carousel_ui(root: &Overlay, fixed_width: u32) -> PlayerctlCarouselUi {
+fn build_carousel_ui(
+    root: &Overlay,
+    fixed_width: u32,
+    extra_classes: Option<&str>,
+) -> PlayerctlCarouselUi {
     let area = DrawingArea::new();
     area.add_css_class("playerctl-carousel");
     area.set_overflow(gtk::Overflow::Hidden);
@@ -368,7 +372,7 @@ fn build_carousel_ui(root: &Overlay, fixed_width: u32) -> PlayerctlCarouselUi {
     area.set_valign(gtk::Align::Center);
 
     let viewport_width_px = fixed_width_px_for_widget(&area, fixed_width);
-    let viewport_height_px = fixed_height_px_for_widget(&area);
+    let viewport_height_px = fixed_height_px_from_label_probe(extra_classes);
     area.set_content_width(viewport_width_px);
     area.set_content_height(viewport_height_px);
     area.set_size_request(viewport_width_px, -1);
@@ -525,12 +529,16 @@ fn fixed_width_px_for_widget(widget: &impl IsA<Widget>, fixed_width_chars: u32) 
     pixel_width.max(1)
 }
 
-fn fixed_height_px_for_widget(widget: &impl IsA<Widget>) -> i32 {
-    let layout = widget.create_pango_layout(Some("Mg"));
-    let (_, pixel_height) = layout.pixel_size();
-    // DrawingArea glyph bounds are tighter than GtkLabel's rendered line box.
-    // Add a small pad so fixed-width playerctl matches adjacent label modules.
-    (pixel_height + 4).max(1)
+fn fixed_height_px_from_label_probe(extra_classes: Option<&str>) -> i32 {
+    let probe = Label::new(Some("Mg"));
+    probe.add_css_class("module");
+    probe.add_css_class("playerctl");
+    apply_css_classes(&probe, extra_classes);
+    probe.set_wrap(false);
+    probe.set_single_line_mode(true);
+
+    let (_, natural, _, _) = probe.measure(Orientation::Vertical, -1);
+    natural.max(1)
 }
 
 fn measure_text_width_px(widget: &impl IsA<Widget>, text: &str) -> f64 {
