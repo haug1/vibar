@@ -20,6 +20,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Sway integration includes `sway/workspaces` and `sway/window` (focused window title gated per output)
 - `sway/workspaces` supports container `class` plus per-button `button-class` style overrides
 - `playerctl` supports `max-width` (caps width while shrinking to content when short)
+- `playerctl` shows a visible `…` cue when text is truncated
 - Config lookup order: `~/.config/vibar/config.jsonc` then `./config.jsonc`
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS

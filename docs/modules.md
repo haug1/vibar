@@ -272,6 +272,7 @@ Behavior:
 - Active player selection policy: `playing` > `paused` > `stopped`, then stable bus-name sort.
 - If no matching player exists, module text falls back to `no_player_text`.
 - With `max-width` set, the module shrinks to content for short text and caps width for long text.
+- With `max-width` set and text overflow, the module renders a visible `…` truncation cue.
 - If `marquee=hover`, `marquee=open`, or `marquee=always`, long text scrolls smoothly by pixel offset (stable with proportional fonts).
 - `marquee=off` keeps clipped static text and avoids continuous animation overhead.
 - `marquee=open` animates only while the controls popover is open (`controls.enabled=true`).

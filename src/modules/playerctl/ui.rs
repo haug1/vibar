@@ -113,12 +113,23 @@ pub(super) fn build_carousel_ui(
 
     area.set_draw_func({
         let state = state.clone();
-        move |area, context, _width, height| {
+        move |area, context, width, height| {
             let state = state.borrow();
             let Some(layout) = state.layout.as_ref() else {
                 return;
             };
             let y = ((height - state.text_height_px).max(0) as f64) / 2.0;
+            let show_overflow_hint = should_show_overflow_hint(&state, marquee);
+            let hint_width_px = if show_overflow_hint {
+                overflow_hint_width_px(area)
+            } else {
+                0
+            };
+            let text_clip_width_px = (width - hint_width_px).max(1);
+
+            context.save().ok();
+            context.rectangle(0.0, 0.0, f64::from(text_clip_width_px), f64::from(height));
+            context.clip();
 
             render_layout_at(area, context, -state.offset_px, y, layout);
 
@@ -127,6 +138,11 @@ pub(super) fn build_carousel_ui(
                 if next_x < area.allocated_width() as f64 {
                     render_layout_at(area, context, next_x, y, layout);
                 }
+            }
+            context.restore().ok();
+
+            if show_overflow_hint {
+                render_overflow_hint(area, context, y);
             }
         }
     });
@@ -743,6 +759,37 @@ fn fixed_height_px_from_label_probe(extra_classes: Option<&str>) -> i32 {
 
 fn carousel_gap_px() -> f64 {
     42.0
+}
+
+fn should_show_overflow_hint(
+    state: &PlayerctlCarouselState,
+    marquee: PlayerctlMarqueeMode,
+) -> bool {
+    let is_overflowing = state.content_width_px > state.viewport_width_px as f64;
+    if !is_overflowing {
+        return false;
+    }
+
+    match marquee {
+        PlayerctlMarqueeMode::Off => true,
+        PlayerctlMarqueeMode::Hover => !state.hover_active,
+        PlayerctlMarqueeMode::Open => !state.open_active,
+        PlayerctlMarqueeMode::Always => false,
+    }
+}
+
+fn overflow_hint_width_px(area: &DrawingArea) -> i32 {
+    let layout = area.create_pango_layout(Some("…"));
+    let (width, _) = layout.pixel_size();
+    width.max(1) + 4
+}
+
+fn render_overflow_hint(area: &DrawingArea, context: &gtk::cairo::Context, text_y: f64) {
+    let hint = "…";
+    let layout = area.create_pango_layout(Some(hint));
+    let (hint_width, _) = layout.pixel_size();
+    let x = f64::from((area.allocated_width() - hint_width - 1).max(0));
+    render_layout_at(area, context, x, text_y, &layout);
 }
 
 fn build_controls_metadata_labels(key: &str) -> (Label, Label) {
