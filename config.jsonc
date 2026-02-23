@@ -13,7 +13,7 @@
   },
   "areas": {
     "left": [{ "type": "sway/workspaces" }],
-    "center": [],
+    "center": [{ "type": "sway/window" }],
     "right": [
       {
         "type": "playerctl",

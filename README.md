@@ -49,6 +49,7 @@ make ci
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system (`docs/modules.md`)
+- Sway modules for workspaces and active-window title (`sway/workspaces`, `sway/window`)
 - Config file search order:
   - `~/.config/vibar/config.jsonc`
   - `./config.jsonc` (fallback)

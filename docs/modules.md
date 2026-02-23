@@ -15,7 +15,7 @@ Top-level config uses three layout areas:
   "areas": {
     "left": [{ "type": "sway/workspaces" }],
     "center": [
-      { "type": "playerctl", "format": "{status_icon} {artist} - {title}" },
+      { "type": "sway/window" }
     ],
     "right": [
       {
@@ -132,6 +132,35 @@ Styling:
 - Container classes: `.module.workspaces`
 - Per-workspace button class: `.menu-button`
 - Active state classes: `.menu-button.active`, `.menu-button.workspace-active`
+
+## `sway/window`
+
+Minimal schema:
+
+```json
+{
+  "type": "sway/window",
+  "click": "optional shell command",
+  "class": "optional-css-classes"
+}
+```
+
+Fields:
+
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+
+Behavior:
+
+- Sway IPC focused-window title module.
+- Updates on window/workspace/output events (event-driven refresh).
+- Shows the currently focused window title.
+- On multi-monitor setups, module is only visible on the bar whose output owns the focused workspace.
+
+Styling:
+
+- Label classes: `.module.sway-window`
 
 ## `clock`
 

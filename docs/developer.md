@@ -4,7 +4,7 @@ This document contains implementation-facing details that are intentionally kept
 
 ## Architecture
 
-- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `playerctl`, `sway/workspaces`, `pulseaudio`).
+- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `playerctl`, `sway/workspaces`, `sway/window`, `pulseaudio`).
 - `src/modules/mod.rs` stores raw module config entries:
   - `type: String`
   - module-specific fields as a dynamic map (`serde_json::Map<String, Value>`)

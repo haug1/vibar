@@ -49,6 +49,7 @@ const FACTORIES: &[&dyn ModuleFactory] = &[
     &playerctl::FACTORY,
     &group::FACTORY,
     &pulseaudio::FACTORY,
+    &sway::window::FACTORY,
     &sway::workspaces::FACTORY,
     &clock::FACTORY,
     &tray::FACTORY,
