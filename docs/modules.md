@@ -170,7 +170,8 @@ Schema:
 {
   "type": "clock",
   "format": "%a %d. %b %H:%M:%S",
-  "click": "optional shell command"
+  "click": "optional shell command",
+  "class": "optional-css-classes"
 }
 ```
 
@@ -180,6 +181,7 @@ Fields:
   - Default: `%a %d. %b %H:%M:%S`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Behavior:
 

@@ -5,7 +5,9 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::modules::{attach_primary_click_command, ModuleBuildContext, ModuleConfig};
+use crate::modules::{
+    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+};
 
 use super::ModuleFactory;
 
@@ -20,6 +22,8 @@ pub(crate) struct ClockConfig {
     pub(crate) click: Option<String>,
     #[serde(rename = "on-click", default)]
     pub(crate) on_click: Option<String>,
+    #[serde(default)]
+    pub(crate) class: Option<String>,
 }
 
 pub(crate) struct ClockFactory;
@@ -34,7 +38,7 @@ impl ModuleFactory for ClockFactory {
     fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
         let click_command = parsed.click.or(parsed.on_click);
-        Ok(build_clock_module(parsed.format, click_command).upcast())
+        Ok(build_clock_module(parsed.format, click_command, parsed.class).upcast())
     }
 }
 
@@ -56,10 +60,15 @@ fn parse_config(module: &ModuleConfig) -> Result<ClockConfig, String> {
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-pub(crate) fn build_clock_module(format: Option<String>, click_command: Option<String>) -> Label {
+pub(crate) fn build_clock_module(
+    format: Option<String>,
+    click_command: Option<String>,
+    class: Option<String>,
+) -> Label {
     let label = Label::new(None);
     label.add_css_class("module");
     label.add_css_class("clock");
+    apply_css_classes(&label, class.as_deref());
     attach_primary_click_command(&label, click_command);
 
     let fmt = format.unwrap_or_else(|| DEFAULT_CLOCK_FMT.to_string());
