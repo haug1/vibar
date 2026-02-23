@@ -215,7 +215,8 @@ Schema:
 ```json
 {
   "type": "clock",
-  "format": "%a %d. %b %H:%M:%S",
+  "time-format": "%a %d. %b %H:%M:%S",
+  "format": "<span style=\"italic\">{}</span>",
   "click": "optional shell command",
   "class": "optional-css-classes"
 }
@@ -223,8 +224,12 @@ Schema:
 
 Fields:
 
-- `format` (optional): `chrono` format string.
+- `time-format` / `time_format` (optional): `chrono` format string for the raw time value.
   - Default: `%a %d. %b %H:%M:%S`
+- `format` (optional): display template where `{}` is replaced with the formatted time.
+  - Supports Pango markup.
+  - Replaced time text is markup-escaped before insertion.
+  - Default: `{}`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).

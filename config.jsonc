@@ -71,7 +71,11 @@
           { "type": "tray", "icon_size": 16, "poll_interval_secs": 2 },
         ],
       },
-      { "type": "clock", "format": "%a %d. %b %H:%M:%S" },
+      {
+        "type": "clock",
+        "time-format": "%a %d. %b %H:%M:%S",
+        "format": "{}",
+      },
     ],
   },
 }
