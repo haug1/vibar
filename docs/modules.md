@@ -276,7 +276,7 @@ Behavior:
 - If `marquee=hover`, `marquee=open`, or `marquee=always`, long text scrolls smoothly by pixel offset (stable with proportional fonts).
 - `marquee=off` keeps clipped static text and avoids continuous animation overhead.
 - `marquee=open` animates only while the controls popover is open (`controls.enabled=true`).
-- Playerctl text is exposed as a hover tooltip while controls are closed, so clipped/scrolled text remains discoverable.
+- Playerctl text is exposed as a hover tooltip only when text is actually truncated (and controls are closed), so clipped text remains discoverable without extra noise.
 - When `controls.enabled=true`, left-click opens a popover with centered transport buttons on top, a key/value metadata list (`Status`, `Player`, `Artist`, `Album`, `Title`), and optional seek slider.
 - While the controls popover is open, hover tooltip display is temporarily suppressed to avoid UI overlap.
 - Controls popover width follows the module width; long metadata values wrap within that width (`WordChar` wrapping).

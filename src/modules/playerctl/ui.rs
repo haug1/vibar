@@ -51,6 +51,7 @@ pub(super) struct PlayerctlCarouselUi {
 #[derive(Clone)]
 pub(super) struct PlayerctlTooltipUi {
     label: Label,
+    show_on_hover: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -163,6 +164,7 @@ pub(super) fn set_playerctl_text(
     text: &str,
 ) {
     tooltip_ui.label.set_text(text);
+    tooltip_ui.show_on_hover.store(false, Ordering::Relaxed);
 
     if let Some(carousel) = carousel {
         let should_reset = {
@@ -174,6 +176,14 @@ pub(super) fn set_playerctl_text(
             reset_carousel_state(carousel, text);
             carousel.area.queue_draw();
         }
+
+        let is_truncated = {
+            let state = carousel.state.borrow();
+            state.content_width_px > state.viewport_width_px as f64
+        };
+        tooltip_ui
+            .show_on_hover
+            .store(is_truncated, Ordering::Relaxed);
     } else {
         label.set_text(text);
     }
@@ -196,6 +206,7 @@ pub(super) fn build_playerctl_tooltip(
     label.set_single_line_mode(true);
     label.set_xalign(0.0);
     popover.set_child(Some(&label));
+    let show_on_hover = Arc::new(AtomicBool::new(false));
 
     let tooltip_suppressed = Arc::new(AtomicBool::new(false));
     if let Some(controls_popover) = controls_popover {
@@ -216,8 +227,12 @@ pub(super) fn build_playerctl_tooltip(
         let popover = popover.clone();
         let label = label.clone();
         let tooltip_suppressed = tooltip_suppressed.clone();
+        let show_on_hover = show_on_hover.clone();
         motion.connect_enter(move |_, _, _| {
-            if !tooltip_suppressed.load(Ordering::Relaxed) && !label.text().is_empty() {
+            if !tooltip_suppressed.load(Ordering::Relaxed)
+                && show_on_hover.load(Ordering::Relaxed)
+                && !label.text().is_empty()
+            {
                 popover.popup();
             }
         });
@@ -230,7 +245,10 @@ pub(super) fn build_playerctl_tooltip(
     }
     root.add_controller(motion);
 
-    PlayerctlTooltipUi { label }
+    PlayerctlTooltipUi {
+        label,
+        show_on_hover,
+    }
 }
 
 pub(super) fn install_carousel_hover_tracking(root: &Overlay, carousel: &PlayerctlCarouselUi) {

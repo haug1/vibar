@@ -19,6 +19,7 @@ This document contains implementation-facing details that are intentionally kept
 - `playerctl` reads media metadata/status from MPRIS over DBus (`zbus`), updates from DBus signals plus a lightweight periodic position refresh, and supports optional controls popover + `SetPosition` seeking.
   - Width mode: `max-width` caps viewport while allowing short text to shrink naturally.
   - Overflow cue: when clipped, playerctl renders a visible `…` indicator.
+  - Tooltip behavior: hover tooltip appears only while the visible playerctl text is truncated.
   - Implementation layout: `src/modules/playerctl/mod.rs` orchestration + `src/modules/playerctl/config.rs` (schema/defaults), `src/modules/playerctl/backend.rs` (MPRIS DBus backend), `src/modules/playerctl/model.rs` (pure metadata/format helpers), `src/modules/playerctl/ui.rs` (GTK tooltip/carousel/controls UI wiring).
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`.
 - `sway/workspaces` supports module-level `class` and per-button `button-class`/`button_class` style hooks.

@@ -53,6 +53,7 @@ make ci
 - Workspace module supports container and per-workspace-button CSS class overrides
 - Playerctl supports `max-width` display mode for adaptive title width
 - Playerctl shows a truncation cue when text is clipped
+- Playerctl hover tooltip appears only when text is clipped
 - Config file search order:
   - `~/.config/vibar/config.jsonc`
   - `./config.jsonc` (fallback)
