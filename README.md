@@ -62,6 +62,10 @@ make ci
   - optional user CSS loaded on top
   - default CSS can be disabled via `style.load-default`
 
+## Troubleshooting
+
+- If text updates leave tiny font/glyph dots, it may help to set an explicit `line-height` on the affected module class (for example `line-height: 1.5;`).
+
 ## Documentation
 
 - User-facing setup and commands: `README.md`

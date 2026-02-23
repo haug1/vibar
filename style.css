@@ -116,6 +116,10 @@
   opacity: 1;
   padding: 2px 8px;
 }
+.sway-window {
+  /* Keep glyph bounds clear to avoid tiny residue artifacts on title updates. */
+  line-height: 1.5;
+}
 
 /* Group drawer toggle */
 .group-toggle {
