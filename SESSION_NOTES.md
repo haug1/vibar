@@ -18,6 +18,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - 3 layout areas: `left`, `center`, `right`
 - Config-driven module system (canonical reference: `docs/modules.md`)
 - Sway integration includes `sway/workspaces`, `sway/mode`, and `sway/window` (focused window title gated per output)
+- `sway/window` supports Pango-markup `format` templates via `{}` / `{title}` placeholders
 - `sway/workspaces` supports container `class` plus per-button `button-class` style overrides
 - `sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, and `pulseaudio` support Pango markup in format fields (with escaped placeholder values)
 - `exec` supports Pango-markup `format` templates with `{}` / `{text}` placeholders and top-level JSON property placeholders

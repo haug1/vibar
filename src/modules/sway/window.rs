@@ -9,12 +9,14 @@ use serde_json::Value;
 use swayipc::{Connection, EventType, Node, NodeType};
 
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
-    ModuleFactory,
+    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
+    ModuleBuildContext, ModuleConfig, ModuleFactory,
 };
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub(crate) struct WindowConfig {
+    #[serde(default = "default_format")]
+    pub(crate) format: String,
     #[serde(default)]
     pub(crate) click: Option<String>,
     #[serde(rename = "on-click", default)]
@@ -28,6 +30,10 @@ pub(crate) struct SwayWindowFactory;
 pub(crate) const FACTORY: SwayWindowFactory = SwayWindowFactory;
 pub(crate) const MODULE_TYPE: &str = "sway/window";
 
+fn default_format() -> String {
+    "{}".to_string()
+}
+
 impl ModuleFactory for SwayWindowFactory {
     fn module_type(&self) -> &'static str {
         MODULE_TYPE
@@ -38,6 +44,7 @@ impl ModuleFactory for SwayWindowFactory {
         let click_command = parsed.click.or(parsed.on_click);
         Ok(build_window_module(
             context.monitor_connector.clone(),
+            parsed.format,
             click_command,
             parsed.class,
         )
@@ -59,6 +66,7 @@ fn parse_config(module: &ModuleConfig) -> Result<WindowConfig, String> {
 
 fn build_window_module(
     output_filter: Option<String>,
+    format: String,
     click_command: Option<String>,
     class: Option<String>,
 ) -> Label {
@@ -74,18 +82,18 @@ fn build_window_module(
         Ok(pair) => pair,
         Err(err) => {
             eprintln!("vibar/sway-window: failed to create event signal pipe: {err}");
-            refresh_window(&label, output_filter.as_deref());
+            refresh_window(&label, output_filter.as_deref(), &format);
             return label;
         }
     };
     if let Err(err) = signal_rx.set_nonblocking(true) {
         eprintln!("vibar/sway-window: failed to set nonblocking event signal pipe: {err}");
-        refresh_window(&label, output_filter.as_deref());
+        refresh_window(&label, output_filter.as_deref(), &format);
         return label;
     }
 
     start_window_event_listener(signal_tx);
-    refresh_window(&label, output_filter.as_deref());
+    refresh_window(&label, output_filter.as_deref(), &format);
 
     glib::source::unix_fd_add_local(
         signal_rx.as_raw_fd(),
@@ -93,6 +101,7 @@ fn build_window_module(
         {
             let label = label.clone();
             let output_filter = output_filter.clone();
+            let format = format.clone();
             move |_, condition| {
                 if condition.intersects(glib::IOCondition::HUP | glib::IOCondition::ERR) {
                     return ControlFlow::Break;
@@ -113,7 +122,7 @@ fn build_window_module(
                 }
 
                 if had_event {
-                    refresh_window(&label, output_filter.as_deref());
+                    refresh_window(&label, output_filter.as_deref(), &format);
                 }
                 ControlFlow::Continue
             }
@@ -155,11 +164,11 @@ fn start_window_event_listener(mut signal_tx: std::os::unix::net::UnixStream) {
     });
 }
 
-fn refresh_window(label: &Label, output_filter: Option<&str>) {
+fn refresh_window(label: &Label, output_filter: Option<&str>, format: &str) {
     let mut connection = match Connection::new() {
         Ok(conn) => conn,
         Err(_) => {
-            label.set_label("sway?");
+            label.set_markup(&escape_markup_text("sway?"));
             label.set_visible(true);
             return;
         }
@@ -168,7 +177,7 @@ fn refresh_window(label: &Label, output_filter: Option<&str>) {
     let tree = match connection.get_tree() {
         Ok(tree) => tree,
         Err(_) => {
-            label.set_label("sway?");
+            label.set_markup(&escape_markup_text("sway?"));
             label.set_visible(true);
             return;
         }
@@ -196,7 +205,10 @@ fn refresh_window(label: &Label, output_filter: Option<&str>) {
     }
 
     label.set_visible(true);
-    label.set_label(&title);
+    label.set_markup(&render_markup_template(
+        format,
+        &[("{}", &title), ("{title}", &title)],
+    ));
 }
 
 #[derive(Debug, Clone)]
@@ -278,5 +290,12 @@ mod tests {
         let on_click_cfg = parse_config(&on_click_module).expect("on-click config should parse");
         assert!(on_click_cfg.click.is_none());
         assert_eq!(on_click_cfg.on_click.as_deref(), Some("echo alias"));
+    }
+
+    #[test]
+    fn parse_config_has_default_format() {
+        let module = ModuleConfig::new(MODULE_TYPE, Map::new());
+        let cfg = parse_config(&module).expect("config should parse");
+        assert_eq!(cfg.format, "{}");
     }
 }

@@ -152,6 +152,7 @@ Minimal schema:
 ```json
 {
   "type": "sway/window",
+  "format": "{}",
   "click": "optional shell command",
   "class": "optional-css-classes"
 }
@@ -159,6 +160,11 @@ Minimal schema:
 
 Fields:
 
+- `format` (optional): window-title display template.
+  - Supports Pango markup.
+  - Replaced title text is markup-escaped before insertion.
+  - Supported placeholders: `{}` and `{title}`
+  - Default: `{}`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
