@@ -63,10 +63,15 @@
   opacity: 0.92;
 }
 
+.playerctl:hover,
 .module.clickable:hover {
   background: rgba(121, 182, 255, 0.18);
   color: #f8fbff;
   opacity: 1;
+}
+
+.playerctl {
+  padding: 4px 8px;
 }
 
 /* Workspaces */
