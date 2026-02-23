@@ -18,6 +18,7 @@
       {
         "type": "playerctl",
         "format": "{status_icon} {artist} - {title}",
+        "fixed-width": 40,
         "controls": {
           "enabled": true,
           "open": "left-click",

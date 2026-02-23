@@ -167,6 +167,7 @@ Schema:
 {
   "type": "playerctl",
   "format": "{status_icon} {title}",
+  "fixed-width": 40,
   "player": "spotify",
   "no_player_text": "No media",
   "hide-when-idle": true,
@@ -184,6 +185,9 @@ Fields:
 
 - `format` (optional): output format template.
   - Default: `{status_icon} {title}`
+- `fixed-width` / `fixed_width` (optional): fixed visible width in character cells.
+  - If set, text is clipped to this width and long values scroll horizontally in a carousel.
+  - `0` disables fixed-width behavior.
 - `player` (optional): player selector passed to `playerctl --player <name>`.
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `1`
@@ -220,6 +224,8 @@ Behavior:
 - Event-driven updates from MPRIS over DBus (`NameOwnerChanged` + `PropertiesChanged`).
 - Active player selection policy: `playing` > `paused` > `stopped`, then stable bus-name sort.
 - If no matching player exists, module text falls back to `no_player_text`.
+- With `fixed-width` set, the module keeps a bounded width and long text scrolls smoothly by pixel offset (stable with proportional fonts).
+- Playerctl text is always exposed as a tooltip, so hover shows full rendered metadata even while clipped/scrolled.
 - When `controls.enabled=true`, left-click opens a popover with transport buttons and optional seek slider.
 - Seek writes use MPRIS `SetPosition` (guarded by `CanSeek`, track id presence, and positive duration).
 - Slider updates ignore backend refresh while scrubbing to avoid seek feedback loops.
@@ -235,6 +241,7 @@ Styling:
 
 - Label classes: `.module.playerctl`
 - State classes: `.status-playing`, `.status-paused`, `.status-stopped`, `.no-player`
+- Fixed-width carousel classes: `.playerctl-fixed-width`, `.playerctl-carousel`
 - Click-enabled modules include: `.clickable` (both shell-click and controls-enabled cases)
 - Controls popover classes: `.playerctl-controls-popover`, `.playerctl-controls-content`, `.playerctl-controls-row`, `.playerctl-control-button`, `.playerctl-seek-scale`, `.playerctl-seek-time-row`, `.playerctl-seek-time`
 - Optional extra class via `class` field.

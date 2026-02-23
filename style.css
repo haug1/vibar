@@ -148,6 +148,10 @@
   opacity: 0.85;
 }
 
+.playerctl-fixed-width .playerctl-carousel {
+  border: none;
+}
+
 .playerctl-controls-popover contents {
   background: rgba(14, 18, 24, 0.9);
   border: 1px solid rgba(156, 203, 255, 0.35);
