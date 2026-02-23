@@ -210,6 +210,7 @@ Schema:
 {
   "type": "playerctl",
   "format": "{status_icon} {title}",
+  "max-width": 40,
   "fixed-width": 40,
   "marquee": "hover",
   "player": "spotify",
@@ -232,7 +233,11 @@ Fields:
 - `fixed-width` / `fixed_width` (optional): fixed visible width in character cells.
   - If set, text is clipped to this width.
   - `0` disables fixed-width behavior.
-- `marquee` (optional): carousel animation mode for overflow text when `fixed-width` is set.
+- `max-width` / `max_width` (optional): maximum visible width in character cells.
+  - If set, long text is clipped to this width, but short text keeps its natural width.
+  - `0` disables max-width behavior.
+  - If both `fixed-width` and `max-width` are set, `fixed-width` takes precedence.
+- `marquee` (optional): carousel animation mode for overflow text when a width mode is set (`fixed-width` or `max-width`).
   - Supported values: `off`, `hover`, `open`, `always`
   - Default: `off` (while animating, app will use a lot more resources, so it's disabled default)
 - `player` (optional): player selector passed to `playerctl --player <name>`.
@@ -271,7 +276,8 @@ Behavior:
 - Event-driven updates from MPRIS over DBus (`NameOwnerChanged` + `PropertiesChanged`).
 - Active player selection policy: `playing` > `paused` > `stopped`, then stable bus-name sort.
 - If no matching player exists, module text falls back to `no_player_text`.
-- With `fixed-width` set, the module keeps a bounded width.
+- With `fixed-width` set, the module keeps a bounded fixed width.
+- With `max-width` set, the module shrinks to content for short text and caps width for long text.
 - If `marquee=hover`, `marquee=open`, or `marquee=always`, long text scrolls smoothly by pixel offset (stable with proportional fonts).
 - `marquee=off` keeps clipped static text and avoids continuous animation overhead.
 - `marquee=open` animates only while the controls popover is open (`controls.enabled=true`).
@@ -293,7 +299,7 @@ Styling:
 
 - Label classes: `.module.playerctl`
 - State classes: `.status-playing`, `.status-paused`, `.status-stopped`, `.no-player`
-- Fixed-width carousel classes: `.playerctl-fixed-width`, `.playerctl-carousel`
+- Width-mode carousel classes: `.playerctl-fixed-width`, `.playerctl-max-width`, `.playerctl-carousel`
 - Controls popover classes: `.playerctl-controls-popover`, `.playerctl-controls-content`, `.playerctl-controls-row`, `.playerctl-control-button`, `.playerctl-controls-metadata-grid`, `.playerctl-controls-metadata-key`, `.playerctl-controls-metadata-value`, `.playerctl-seek-scale`, `.playerctl-seek-time-row`, `.playerctl-seek-time`
 - Optional extra class via `class` field.
 

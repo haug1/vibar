@@ -14,7 +14,7 @@ use gtk::{
 use crate::modules::apply_css_classes;
 
 use super::backend::{call_player_method, call_set_position};
-use super::config::{PlayerctlControlsOpenMode, PlayerctlMarqueeMode};
+use super::config::{PlayerctlControlsOpenMode, PlayerctlMarqueeMode, PlayerctlWidthMode};
 use super::model::{format_timestamp_micros, metadata_seek_ratio, PlayerctlMetadata};
 
 #[derive(Clone)]
@@ -41,8 +41,10 @@ pub(super) struct PlayerctlControlsUi {
 
 #[derive(Clone)]
 pub(super) struct PlayerctlCarouselUi {
+    root: Overlay,
+    width_mode: PlayerctlWidthMode,
+    width_limit_px: i32,
     pub(super) area: DrawingArea,
-    viewport_width_px: i32,
     pub(super) marquee: PlayerctlMarqueeMode,
     state: Rc<RefCell<PlayerctlCarouselState>>,
 }
@@ -57,6 +59,7 @@ struct PlayerctlCarouselState {
     full_text: String,
     layout: Option<gtk::pango::Layout>,
     content_width_px: f64,
+    viewport_width_px: i32,
     text_height_px: i32,
     offset_px: f64,
     last_tick: Instant,
@@ -68,7 +71,8 @@ struct PlayerctlCarouselState {
 
 pub(super) fn build_carousel_ui(
     root: &Overlay,
-    fixed_width: u32,
+    width_chars: u32,
+    width_mode: PlayerctlWidthMode,
     extra_classes: Option<&str>,
     marquee: PlayerctlMarqueeMode,
 ) -> PlayerctlCarouselUi {
@@ -82,7 +86,12 @@ pub(super) fn build_carousel_ui(
     area.set_vexpand(false);
     area.set_valign(gtk::Align::Center);
 
-    let viewport_width_px = fixed_width_px_for_widget(&area, fixed_width);
+    let width_limit_px = width_px_for_widget(&area, width_chars);
+    let viewport_width_px = if matches!(width_mode, PlayerctlWidthMode::Fixed) {
+        width_limit_px
+    } else {
+        1
+    };
     let viewport_height_px = fixed_height_px_from_label_probe(extra_classes);
     area.set_content_width(viewport_width_px);
     area.set_content_height(viewport_height_px);
@@ -98,6 +107,7 @@ pub(super) fn build_carousel_ui(
         full_text: String::new(),
         layout: None,
         content_width_px: 0.0,
+        viewport_width_px,
         text_height_px: 0,
         offset_px: 0.0,
         last_tick: Instant::now(),
@@ -128,8 +138,10 @@ pub(super) fn build_carousel_ui(
     });
 
     PlayerctlCarouselUi {
+        root: root.clone(),
+        width_mode,
+        width_limit_px,
         area,
-        viewport_width_px,
         marquee,
         state,
     }
@@ -294,7 +306,7 @@ pub(super) fn install_carousel_animation(carousel: PlayerctlCarouselUi) {
 
             if !should_return_early
                 && (state.full_text.is_empty()
-                    || state.content_width_px <= carousel.viewport_width_px as f64)
+                    || state.content_width_px <= state.viewport_width_px as f64)
             {
                 if state.offset_px != 0.0 {
                     state.offset_px = 0.0;
@@ -698,19 +710,30 @@ pub(super) fn sync_controls_width(controls_ui: &PlayerctlControlsUi, module_widt
 fn reset_carousel_state(carousel: &PlayerctlCarouselUi, text: &str) {
     let layout = carousel.area.create_pango_layout(Some(text));
     let (text_width_px, text_height_px) = layout.pixel_size();
+    let content_width_px = text_width_px.max(1);
+    let viewport_width_px = match carousel.width_mode {
+        PlayerctlWidthMode::Fixed => carousel.width_limit_px,
+        PlayerctlWidthMode::Max => content_width_px.min(carousel.width_limit_px),
+    };
+
     let mut state = carousel.state.borrow_mut();
     state.full_text = text.to_string();
     state.layout = Some(layout);
-    state.content_width_px = text_width_px.max(1) as f64;
+    state.content_width_px = content_width_px as f64;
+    state.viewport_width_px = viewport_width_px;
     state.text_height_px = text_height_px.max(1);
     state.offset_px = 0.0;
     state.last_tick = Instant::now();
     state.hold_until = Some(Instant::now() + Duration::from_millis(900));
     state.waiting_restart = false;
+
+    carousel.area.set_content_width(viewport_width_px);
+    carousel.area.set_size_request(viewport_width_px, -1);
+    carousel.root.set_size_request(viewport_width_px, -1);
 }
 
-fn fixed_width_px_for_widget(widget: &impl IsA<Widget>, fixed_width_chars: u32) -> i32 {
-    let sample = "M".repeat(fixed_width_chars as usize);
+fn width_px_for_widget(widget: &impl IsA<Widget>, width_chars: u32) -> i32 {
+    let sample = "M".repeat(width_chars as usize);
     let layout = widget.create_pango_layout(Some(sample.as_str()));
     let (pixel_width, _) = layout.pixel_size();
     pixel_width.max(1)

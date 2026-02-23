@@ -32,8 +32,16 @@ pub(super) struct PlayerctlConfig {
     pub(super) controls: PlayerctlControlsConfig,
     #[serde(rename = "fixed-width", alias = "fixed_width", default)]
     pub(super) fixed_width: Option<u32>,
+    #[serde(rename = "max-width", alias = "max_width", default)]
+    pub(super) max_width: Option<u32>,
     #[serde(default)]
     pub(super) marquee: PlayerctlMarqueeMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PlayerctlWidthMode {
+    Fixed,
+    Max,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -83,12 +91,23 @@ pub(super) struct PlayerctlViewConfig {
     pub(super) controls_enabled: bool,
     pub(super) controls_open: PlayerctlControlsOpenMode,
     pub(super) controls_show_seek: bool,
-    pub(super) fixed_width: Option<u32>,
+    pub(super) width_chars: Option<u32>,
+    pub(super) width_mode: Option<PlayerctlWidthMode>,
     pub(super) marquee: PlayerctlMarqueeMode,
 }
 
 impl PlayerctlConfig {
     pub(super) fn into_view(self) -> PlayerctlViewConfig {
+        let fixed_width = self.fixed_width.and_then(normalize_width_chars);
+        let max_width = self.max_width.and_then(normalize_width_chars);
+        let (width_chars, width_mode) = if let Some(width) = fixed_width {
+            (Some(width), Some(PlayerctlWidthMode::Fixed))
+        } else if let Some(width) = max_width {
+            (Some(width), Some(PlayerctlWidthMode::Max))
+        } else {
+            (None, None)
+        };
+
         PlayerctlViewConfig {
             format: self
                 .format
@@ -103,7 +122,8 @@ impl PlayerctlConfig {
             controls_enabled: self.controls.enabled,
             controls_open: self.controls.open,
             controls_show_seek: self.controls.show_seek,
-            fixed_width: self.fixed_width.and_then(normalize_fixed_width),
+            width_chars,
+            width_mode,
             marquee: self.marquee,
         }
     }
@@ -123,7 +143,7 @@ pub(super) fn default_playerctl_interval() -> u32 {
     DEFAULT_PLAYERCTL_INTERVAL_SECS
 }
 
-pub(super) fn normalize_fixed_width(value: u32) -> Option<u32> {
+pub(super) fn normalize_width_chars(value: u32) -> Option<u32> {
     if value == 0 {
         return None;
     }
@@ -244,9 +264,50 @@ mod tests {
     }
 
     #[test]
-    fn normalize_fixed_width_rejects_zero() {
-        assert_eq!(normalize_fixed_width(0), None);
-        assert_eq!(normalize_fixed_width(1), Some(1));
+    fn parse_config_supports_max_width_keys() {
+        let kebab = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "max-width": 26
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let snake = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "max_width": 24
+            }))
+            .expect("playerctl config map should parse"),
+        );
+
+        let kebab_cfg = super::super::parse_config(&kebab).expect("config should parse");
+        let snake_cfg = super::super::parse_config(&snake).expect("config should parse");
+
+        assert_eq!(kebab_cfg.max_width, Some(26));
+        assert_eq!(snake_cfg.max_width, Some(24));
+    }
+
+    #[test]
+    fn normalize_width_chars_rejects_zero() {
+        assert_eq!(normalize_width_chars(0), None);
+        assert_eq!(normalize_width_chars(1), Some(1));
+    }
+
+    #[test]
+    fn into_view_prefers_fixed_width_over_max_width() {
+        let module = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "fixed-width": 40,
+                "max-width": 24
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let cfg = super::super::parse_config(&module).expect("config should parse");
+        let view = cfg.into_view();
+
+        assert_eq!(view.width_chars, Some(40));
+        assert_eq!(view.width_mode, Some(PlayerctlWidthMode::Fixed));
     }
 
     #[test]
