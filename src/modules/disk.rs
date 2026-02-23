@@ -8,7 +8,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
+    ModuleBuildContext, ModuleConfig,
 };
 
 use super::ModuleFactory;
@@ -120,7 +121,7 @@ pub(crate) fn build_disk_module(
     std::thread::spawn(move || loop {
         let text = match read_disk_status(&poll_path) {
             Ok(status) => render_format(&poll_format, &status),
-            Err(err) => format!("disk error: {err}"),
+            Err(err) => escape_markup_text(&format!("disk error: {err}")),
         };
         let _ = sender.send(text);
         std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
@@ -130,7 +131,7 @@ pub(crate) fn build_disk_module(
         let label = label.clone();
         move || {
             while let Ok(text) = receiver.try_recv() {
-                label.set_text(&text);
+                label.set_markup(&text);
             }
             ControlFlow::Continue
         }
@@ -207,13 +208,17 @@ fn render_format(format: &str, status: &DiskStatus) -> String {
         (status.used_bytes as f64 / status.total_bytes as f64) * 100.0
     };
 
-    format
-        .replace("{path}", &status.path)
-        .replace("{free}", &format_bytes(status.free_bytes))
-        .replace("{used}", &format_bytes(status.used_bytes))
-        .replace("{total}", &format_bytes(status.total_bytes))
-        .replace("{percentage_free}", &format!("{free_pct:.0}"))
-        .replace("{percentage_used}", &format!("{used_pct:.0}"))
+    render_markup_template(
+        format,
+        &[
+            ("{path}", &status.path),
+            ("{free}", &format_bytes(status.free_bytes)),
+            ("{used}", &format_bytes(status.used_bytes)),
+            ("{total}", &format_bytes(status.total_bytes)),
+            ("{percentage_free}", &format!("{free_pct:.0}")),
+            ("{percentage_used}", &format!("{used_pct:.0}")),
+        ],
+    )
 }
 
 fn format_bytes(bytes: u64) -> String {

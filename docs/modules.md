@@ -15,6 +15,7 @@ Top-level config uses three layout areas:
   "areas": {
     "left": [{ "type": "sway/workspaces" }],
     "center": [
+      { "type": "sway/mode", "class": "v-pill" },
       { "type": "sway/window" }
     ],
     "right": [
@@ -172,6 +173,40 @@ Behavior:
 Styling:
 
 - Label classes: `.module.sway-window`
+
+## `sway/mode`
+
+Minimal schema:
+
+```json
+{
+  "type": "sway/mode",
+  "format": "{}",
+  "click": "optional shell command",
+  "class": "optional-css-classes"
+}
+```
+
+Fields:
+
+- `format` (optional): mode display format where `{}` is replaced with the active mode name.
+  - Supports Pango markup (for example `<span style="italic">{}</span>`).
+  - Replaced mode text is markup-escaped before insertion.
+  - Default: `{}`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+
+Behavior:
+
+- Sway IPC binding mode module.
+- Updates on sway `mode` events (event-driven refresh).
+- Hidden when mode is `default`.
+- Visible in non-default modes (for example `resize`).
+
+Styling:
+
+- Label classes: `.module.sway-mode`
 
 ## `clock`
 
@@ -354,6 +389,8 @@ Schema:
 Fields:
 
 - `format` (optional): output format template.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: `{free}`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
@@ -400,6 +437,8 @@ Schema:
 Fields:
 
 - `format` (optional): output format template.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: `{used_percentage}%`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
@@ -445,6 +484,8 @@ Schema:
 Fields:
 
 - `format` (optional): output format template.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: `{used_percentage}%`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
@@ -551,16 +592,28 @@ Fields:
   - Default: `1`
   - Values `<= 0` disable scroll volume changes.
 - `format` (optional): default output format.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: `{volume}% {icon}  {format_source}`
 - `format-bluetooth` (optional): format used for Bluetooth sinks.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: `{volume}% {icon} {format_source}`
 - `format-bluetooth-muted` (optional): format used for muted Bluetooth sinks.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: ` {icon} {format_source}`
 - `format-muted` (optional): format used for muted non-Bluetooth sinks.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: ` {format_source}`
 - `format-source` (optional): source indicator when source is unmuted.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: ``
 - `format-source-muted` (optional): source indicator when source is muted.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: ``
 - `format-icons` (optional): icon mapping object for sink types and volume.
   - Supported keys: `headphone`, `speaker`, `hdmi`, `headset`, `hands-free`, `portable`, `car`, `hifi`, `phone`, `default`

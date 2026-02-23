@@ -8,7 +8,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
+    ModuleBuildContext, ModuleConfig,
 };
 
 use super::ModuleFactory;
@@ -106,7 +107,7 @@ pub(crate) fn build_memory_module(
     std::thread::spawn(move || loop {
         let text = match read_memory_status() {
             Ok(status) => render_format(&poll_format, &status),
-            Err(err) => format!("memory error: {err}"),
+            Err(err) => escape_markup_text(&format!("memory error: {err}")),
         };
         let _ = sender.send(text);
         std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
@@ -116,7 +117,7 @@ pub(crate) fn build_memory_module(
         let label = label.clone();
         move || {
             while let Ok(text) = receiver.try_recv() {
-                label.set_text(&text);
+                label.set_markup(&text);
             }
             ControlFlow::Continue
         }
@@ -186,14 +187,18 @@ fn render_format(format: &str, status: &MemoryStatus) -> String {
         (status.available_bytes as f64 / total) * 100.0
     };
 
-    format
-        .replace("{used}", &format_bytes(status.used_bytes))
-        .replace("{free}", &format_bytes(status.free_bytes))
-        .replace("{available}", &format_bytes(status.available_bytes))
-        .replace("{total}", &format_bytes(status.total_bytes))
-        .replace("{used_percentage}", &format!("{used_pct:.0}"))
-        .replace("{free_percentage}", &format!("{free_pct:.0}"))
-        .replace("{available_percentage}", &format!("{available_pct:.0}"))
+    render_markup_template(
+        format,
+        &[
+            ("{used}", &format_bytes(status.used_bytes)),
+            ("{free}", &format_bytes(status.free_bytes)),
+            ("{available}", &format_bytes(status.available_bytes)),
+            ("{total}", &format_bytes(status.total_bytes)),
+            ("{used_percentage}", &format!("{used_pct:.0}")),
+            ("{free_percentage}", &format!("{free_pct:.0}")),
+            ("{available_percentage}", &format!("{available_pct:.0}")),
+        ],
+    )
 }
 
 fn format_bytes(bytes: u64) -> String {

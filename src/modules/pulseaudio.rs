@@ -19,7 +19,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
+    ModuleBuildContext, ModuleConfig,
 };
 
 use super::ModuleFactory;
@@ -235,7 +236,7 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
         let label = label.clone();
         move || {
             while let Ok(text) = ui_receiver.try_recv() {
-                label.set_text(&text);
+                label.set_markup(&text);
             }
             ControlFlow::Continue
         }
@@ -261,7 +262,7 @@ fn run_native_loop(
         match run_native_session(&ui_sender, &worker_rx, &config) {
             Ok(()) => return,
             Err(err) => {
-                let _ = ui_sender.send(format!("audio error: {err}"));
+                let _ = ui_sender.send(escape_markup_text(&format!("audio error: {err}")));
                 std::thread::sleep(Duration::from_secs(SESSION_RECONNECT_DELAY_SECS));
             }
         }
@@ -338,7 +339,7 @@ fn run_native_session(
                     let _ = ui_sender.send(render_format(config, &state));
                 }
                 Err(err) => {
-                    let _ = ui_sender.send(format!("audio error: {err}"));
+                    let _ = ui_sender.send(escape_markup_text(&format!("audio error: {err}")));
                 }
             }
         }
@@ -729,10 +730,14 @@ fn render_format(config: &PulseAudioConfig, state: &PulseState) -> String {
 
     let icon = config.format_icons.icon_for(state.icon_kind, state.volume);
 
-    format
-        .replace("{volume}", &state.volume.to_string())
-        .replace("{icon}", &icon)
-        .replace("{format_source}", source)
+    render_markup_template(
+        format,
+        &[
+            ("{volume}", &state.volume.to_string()),
+            ("{icon}", &icon),
+            ("{format_source}", source),
+        ],
+    )
 }
 
 impl PulseAudioFormatIcons {

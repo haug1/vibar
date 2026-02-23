@@ -8,7 +8,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
+    ModuleBuildContext, ModuleConfig,
 };
 
 use super::ModuleFactory;
@@ -133,7 +134,7 @@ pub(crate) fn build_cpu_module(
                     }
                 }
                 Err(err) => CpuUpdate {
-                    text: format!("cpu error: {err}"),
+                    text: escape_markup_text(&format!("cpu error: {err}")),
                     usage_class: "usage-unknown",
                 },
             };
@@ -147,7 +148,7 @@ pub(crate) fn build_cpu_module(
         let label = label.clone();
         move || {
             while let Ok(update) = receiver.try_recv() {
-                label.set_text(&update.text);
+                label.set_markup(&update.text);
                 for class_name in CPU_USAGE_CLASSES {
                     label.remove_css_class(class_name);
                 }
@@ -206,9 +207,13 @@ fn render_format(format: &str, used_percentage: f64) -> String {
     let used_percentage = used_percentage.clamp(0.0, 100.0) as u16;
     let idle_percentage = 100u16.saturating_sub(used_percentage);
 
-    format
-        .replace("{used_percentage}", &used_percentage.to_string())
-        .replace("{idle_percentage}", &idle_percentage.to_string())
+    render_markup_template(
+        format,
+        &[
+            ("{used_percentage}", &used_percentage.to_string()),
+            ("{idle_percentage}", &idle_percentage.to_string()),
+        ],
+    )
 }
 
 fn usage_css_class(used_percentage: f64) -> &'static str {
