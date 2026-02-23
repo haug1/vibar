@@ -168,6 +168,7 @@ Schema:
   "type": "playerctl",
   "format": "{status_icon} {title}",
   "fixed-width": 40,
+  "marquee": "hover",
   "player": "spotify",
   "no_player_text": "No media",
   "hide-when-idle": true,
@@ -186,8 +187,11 @@ Fields:
 - `format` (optional): output format template.
   - Default: `{status_icon} {title}`
 - `fixed-width` / `fixed_width` (optional): fixed visible width in character cells.
-  - If set, text is clipped to this width and long values scroll horizontally in a carousel.
+  - If set, text is clipped to this width.
   - `0` disables fixed-width behavior.
+- `marquee` (optional): carousel animation mode for overflow text when `fixed-width` is set.
+  - Supported values: `off`, `hover`, `open`, `always`
+  - Default: `off`
 - `player` (optional): player selector passed to `playerctl --player <name>`.
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `1`
@@ -224,7 +228,10 @@ Behavior:
 - Event-driven updates from MPRIS over DBus (`NameOwnerChanged` + `PropertiesChanged`).
 - Active player selection policy: `playing` > `paused` > `stopped`, then stable bus-name sort.
 - If no matching player exists, module text falls back to `no_player_text`.
-- With `fixed-width` set, the module keeps a bounded width and long text scrolls smoothly by pixel offset (stable with proportional fonts).
+- With `fixed-width` set, the module keeps a bounded width.
+- If `marquee=hover`, `marquee=open`, or `marquee=always`, long text scrolls smoothly by pixel offset (stable with proportional fonts).
+- `marquee=off` keeps clipped static text and avoids continuous animation overhead.
+- `marquee=open` animates only while the controls popover is open (`controls.enabled=true`).
 - Playerctl text is always exposed as a tooltip, so hover shows full rendered metadata even while clipped/scrolled.
 - When `controls.enabled=true`, left-click opens a popover with transport buttons and optional seek slider.
 - Seek writes use MPRIS `SetPosition` (guarded by `CanSeek`, track id presence, and positive duration).

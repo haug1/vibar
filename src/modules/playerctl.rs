@@ -71,6 +71,8 @@ pub(crate) struct PlayerctlConfig {
     pub(crate) controls: PlayerctlControlsConfig,
     #[serde(rename = "fixed-width", alias = "fixed_width", default)]
     pub(crate) fixed_width: Option<u32>,
+    #[serde(default)]
+    pub(crate) marquee: PlayerctlMarqueeMode,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -93,6 +95,18 @@ pub(crate) enum PlayerctlControlsOpenMode {
     #[serde(alias = "left_click", alias = "left")]
     #[default]
     LeftClick,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PlayerctlMarqueeMode {
+    #[default]
+    Off,
+    #[serde(alias = "on-hover", alias = "on_hover", alias = "hover_only")]
+    Hover,
+    #[serde(alias = "while-open", alias = "while_open", alias = "on-open")]
+    Open,
+    Always,
 }
 
 impl Default for PlayerctlControlsConfig {
@@ -138,6 +152,7 @@ struct PlayerctlViewConfig {
     controls_open: PlayerctlControlsOpenMode,
     controls_show_seek: bool,
     fixed_width: Option<u32>,
+    marquee: PlayerctlMarqueeMode,
 }
 
 #[derive(Debug, Clone)]
@@ -172,6 +187,7 @@ impl ModuleFactory for PlayerctlFactory {
             controls_open: parsed.controls.open,
             controls_show_seek: parsed.controls.show_seek,
             fixed_width: parsed.fixed_width.and_then(normalize_fixed_width),
+            marquee: parsed.marquee,
         };
 
         Ok(build_playerctl_module(view).upcast())
@@ -243,7 +259,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
 
     let carousel = config.fixed_width.map(|fixed_width| {
         root.add_css_class("playerctl-fixed-width");
-        build_carousel_ui(&root, fixed_width, config.class.as_deref())
+        build_carousel_ui(&root, fixed_width, config.class.as_deref(), config.marquee)
     });
     if let Some(carousel) = &carousel {
         root.set_child(Some(&carousel.area));
@@ -325,6 +341,14 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
     });
 
     if let Some(carousel) = &carousel {
+        if matches!(carousel.marquee, PlayerctlMarqueeMode::Hover) {
+            install_carousel_hover_tracking(&root, carousel);
+        }
+        if matches!(carousel.marquee, PlayerctlMarqueeMode::Open) {
+            if let Some(controls) = &controls_ui {
+                install_carousel_open_tracking(&controls.popover, carousel);
+            }
+        }
         install_carousel_animation(carousel.clone());
     }
 
@@ -339,6 +363,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
 struct PlayerctlCarouselUi {
     area: DrawingArea,
     viewport_width_px: i32,
+    marquee: PlayerctlMarqueeMode,
     state: Rc<RefCell<PlayerctlCarouselState>>,
 }
 
@@ -350,9 +375,13 @@ struct PlayerctlTooltipUi {
 #[derive(Debug)]
 struct PlayerctlCarouselState {
     full_text: String,
+    layout: Option<gtk::pango::Layout>,
     content_width_px: f64,
+    text_height_px: i32,
     offset_px: f64,
     last_tick: Instant,
+    hover_active: bool,
+    open_active: bool,
     hold_until: Option<Instant>,
     waiting_restart: bool,
 }
@@ -369,6 +398,7 @@ fn build_carousel_ui(
     root: &Overlay,
     fixed_width: u32,
     extra_classes: Option<&str>,
+    marquee: PlayerctlMarqueeMode,
 ) -> PlayerctlCarouselUi {
     let area = DrawingArea::new();
     area.add_css_class("playerctl-carousel");
@@ -394,9 +424,13 @@ fn build_carousel_ui(
 
     let state = Rc::new(RefCell::new(PlayerctlCarouselState {
         full_text: String::new(),
+        layout: None,
         content_width_px: 0.0,
+        text_height_px: 0,
         offset_px: 0.0,
         last_tick: Instant::now(),
+        hover_active: false,
+        open_active: false,
         hold_until: None,
         waiting_restart: false,
     }));
@@ -405,19 +439,18 @@ fn build_carousel_ui(
         let state = state.clone();
         move |area, context, _width, height| {
             let state = state.borrow();
-            if state.full_text.is_empty() {
+            let Some(layout) = state.layout.as_ref() else {
                 return;
-            }
+            };
+            let y = ((height - state.text_height_px).max(0) as f64) / 2.0;
 
-            let layout = area.create_pango_layout(Some(state.full_text.as_str()));
-            let (_, text_height_px) = layout.pixel_size();
-            let y = ((height - text_height_px).max(0) as f64) / 2.0;
-
-            render_layout_at(area, context, -state.offset_px, y, &layout);
+            render_layout_at(area, context, -state.offset_px, y, layout);
 
             if state.content_width_px > area.allocated_width() as f64 {
                 let next_x = -state.offset_px + state.content_width_px + carousel_gap_px();
-                render_layout_at(area, context, next_x, y, &layout);
+                if next_x < area.allocated_width() as f64 {
+                    render_layout_at(area, context, next_x, y, layout);
+                }
             }
         }
     });
@@ -425,6 +458,7 @@ fn build_carousel_ui(
     PlayerctlCarouselUi {
         area,
         viewport_width_px,
+        marquee,
         state,
     }
 }
@@ -488,11 +522,66 @@ fn build_playerctl_tooltip(root: &Overlay) -> PlayerctlTooltipUi {
     PlayerctlTooltipUi { label }
 }
 
+fn install_carousel_hover_tracking(root: &Overlay, carousel: &PlayerctlCarouselUi) {
+    let motion = EventControllerMotion::new();
+    {
+        let state = carousel.state.clone();
+        motion.connect_enter(move |_, _, _| {
+            if let Ok(mut state) = state.try_borrow_mut() {
+                state.hover_active = true;
+                state.last_tick = Instant::now();
+            }
+        });
+    }
+    {
+        let state = carousel.state.clone();
+        let area = carousel.area.clone();
+        motion.connect_leave(move |_| {
+            if let Ok(mut state) = state.try_borrow_mut() {
+                state.hover_active = false;
+                state.offset_px = 0.0;
+                state.hold_until = Some(Instant::now() + Duration::from_millis(350));
+                state.waiting_restart = false;
+            }
+            area.queue_draw();
+        });
+    }
+    root.add_controller(motion);
+}
+
+fn install_carousel_open_tracking(popover: &Popover, carousel: &PlayerctlCarouselUi) {
+    {
+        let state = carousel.state.clone();
+        popover.connect_show(move |_| {
+            if let Ok(mut state) = state.try_borrow_mut() {
+                state.open_active = true;
+                state.last_tick = Instant::now();
+            }
+        });
+    }
+    {
+        let state = carousel.state.clone();
+        let area = carousel.area.clone();
+        popover.connect_hide(move |_| {
+            if let Ok(mut state) = state.try_borrow_mut() {
+                state.open_active = false;
+                state.offset_px = 0.0;
+                state.hold_until = Some(Instant::now() + Duration::from_millis(350));
+                state.waiting_restart = false;
+            }
+            area.queue_draw();
+        });
+    }
+}
+
 fn reset_carousel_state(carousel: &PlayerctlCarouselUi, text: &str) {
-    let content_width_px = measure_text_width_px(&carousel.area, text);
+    let layout = carousel.area.create_pango_layout(Some(text));
+    let (text_width_px, text_height_px) = layout.pixel_size();
     let mut state = carousel.state.borrow_mut();
     state.full_text = text.to_string();
-    state.content_width_px = content_width_px;
+    state.layout = Some(layout);
+    state.content_width_px = text_width_px.max(1) as f64;
+    state.text_height_px = text_height_px.max(1);
     state.offset_px = 0.0;
     state.last_tick = Instant::now();
     state.hold_until = Some(Instant::now() + Duration::from_millis(900));
@@ -504,7 +593,13 @@ fn install_carousel_animation(carousel: PlayerctlCarouselUi) {
     const END_HOLD_MS: u64 = 700;
     const RESTART_HOLD_MS: u64 = 700;
 
-    glib::timeout_add_local(Duration::from_millis(16), move || {
+    glib::timeout_add_local(Duration::from_millis(24), move || {
+        if !carousel.area.is_mapped() {
+            return ControlFlow::Continue;
+        }
+        if matches!(carousel.marquee, PlayerctlMarqueeMode::Off) {
+            return ControlFlow::Continue;
+        }
         let now = Instant::now();
         let mut should_redraw = false;
         let mut should_return_early = false;
@@ -514,8 +609,16 @@ fn install_carousel_animation(carousel: PlayerctlCarouselUi) {
             let elapsed_secs = now.saturating_duration_since(state.last_tick).as_secs_f64();
             state.last_tick = now;
 
-            if state.full_text.is_empty()
-                || state.content_width_px <= carousel.viewport_width_px as f64
+            if matches!(carousel.marquee, PlayerctlMarqueeMode::Hover) && !state.hover_active {
+                should_return_early = true;
+            }
+            if matches!(carousel.marquee, PlayerctlMarqueeMode::Open) && !state.open_active {
+                should_return_early = true;
+            }
+
+            if !should_return_early
+                && (state.full_text.is_empty()
+                    || state.content_width_px <= carousel.viewport_width_px as f64)
             {
                 if state.offset_px != 0.0 {
                     state.offset_px = 0.0;
@@ -584,12 +687,6 @@ fn fixed_height_px_from_label_probe(extra_classes: Option<&str>) -> i32 {
 
     let (_, natural, _, _) = probe.measure(Orientation::Vertical, -1);
     natural.max(1)
-}
-
-fn measure_text_width_px(widget: &impl IsA<Widget>, text: &str) -> f64 {
-    let layout = widget.create_pango_layout(Some(text));
-    let (pixel_width, _) = layout.pixel_size();
-    pixel_width.max(1) as f64
 }
 
 fn carousel_gap_px() -> f64 {
@@ -1458,6 +1555,46 @@ mod tests {
     fn normalize_fixed_width_rejects_zero() {
         assert_eq!(normalize_fixed_width(0), None);
         assert_eq!(normalize_fixed_width(1), Some(1));
+    }
+
+    #[test]
+    fn parse_config_defaults_marquee_to_off() {
+        let module = ModuleConfig::new(MODULE_TYPE, Map::new());
+        let cfg = parse_config(&module).expect("config should parse");
+        assert!(matches!(cfg.marquee, PlayerctlMarqueeMode::Off));
+    }
+
+    #[test]
+    fn parse_config_supports_marquee_modes() {
+        let hover = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "marquee": "hover"
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let open = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "marquee": "open"
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let always = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "marquee": "always"
+            }))
+            .expect("playerctl config map should parse"),
+        );
+
+        let hover_cfg = parse_config(&hover).expect("config should parse");
+        let open_cfg = parse_config(&open).expect("config should parse");
+        let always_cfg = parse_config(&always).expect("config should parse");
+
+        assert!(matches!(hover_cfg.marquee, PlayerctlMarqueeMode::Hover));
+        assert!(matches!(open_cfg.marquee, PlayerctlMarqueeMode::Open));
+        assert!(matches!(always_cfg.marquee, PlayerctlMarqueeMode::Always));
     }
 
     #[test]

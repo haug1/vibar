@@ -19,6 +19,12 @@
         "type": "playerctl",
         "format": "{status_icon} {artist} - {title}",
         "fixed-width": 40,
+        // Overflow text marquee mode for fixed-width playerctl:
+        // - "off" (default): static clipped text
+        // - "hover": animate while hovered
+        // - "open": animate while controls popover is open
+        // - "always": animate continuously
+        "marquee": "off",
         "controls": {
           "enabled": true,
           "open": "left-click",
