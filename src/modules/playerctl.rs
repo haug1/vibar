@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{
-    Box as GtkBox, Button, DrawingArea, GestureClick, Label, Orientation, Overlay, Popover,
-    PositionType, Scale, Widget,
+    Box as GtkBox, Button, DrawingArea, EventControllerMotion, GestureClick, Label, Orientation,
+    Overlay, Popover, PositionType, Scale, Widget,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -231,6 +231,9 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
     root.set_focus_on_click(false);
 
     apply_css_classes(&root, config.class.as_deref());
+    root.set_tooltip_text(None);
+
+    let tooltip_ui = build_playerctl_tooltip(&root);
 
     let label = Label::new(None);
     label.set_xalign(0.0);
@@ -282,6 +285,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
         let show_when_paused = config.show_when_paused;
         let controls_ui = controls_ui.clone();
         let carousel = carousel.clone();
+        let tooltip_ui = tooltip_ui.clone();
         move || {
             while let Ok(update) = receiver.try_recv() {
                 let (text, visibility, state_class) = match update {
@@ -312,7 +316,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
                         (format!("playerctl error: {err}"), true, "no-player")
                     }
                 };
-                set_playerctl_text(&label, &root, carousel.as_ref(), &text);
+                set_playerctl_text(&label, &tooltip_ui, carousel.as_ref(), &text);
                 root.set_visible(visibility);
                 apply_state_class(&root, state_class);
             }
@@ -336,6 +340,11 @@ struct PlayerctlCarouselUi {
     area: DrawingArea,
     viewport_width_px: i32,
     state: Rc<RefCell<PlayerctlCarouselState>>,
+}
+
+#[derive(Clone)]
+struct PlayerctlTooltipUi {
+    label: Label,
 }
 
 #[derive(Debug)]
@@ -422,11 +431,11 @@ fn build_carousel_ui(
 
 fn set_playerctl_text(
     label: &Label,
-    root: &Overlay,
+    tooltip_ui: &PlayerctlTooltipUi,
     carousel: Option<&PlayerctlCarouselUi>,
     text: &str,
 ) {
-    root.set_tooltip_text(Some(text));
+    tooltip_ui.label.set_text(text);
 
     if let Some(carousel) = carousel {
         let should_reset = {
@@ -441,6 +450,42 @@ fn set_playerctl_text(
     } else {
         label.set_text(text);
     }
+}
+
+fn build_playerctl_tooltip(root: &Overlay) -> PlayerctlTooltipUi {
+    let popover = Popover::new();
+    popover.add_css_class("playerctl-tooltip-popover");
+    popover.set_has_arrow(true);
+    popover.set_position(PositionType::Top);
+    popover.set_autohide(false);
+    popover.set_parent(root);
+
+    let label = Label::new(None);
+    label.add_css_class("playerctl-tooltip-label");
+    label.set_wrap(false);
+    label.set_single_line_mode(true);
+    label.set_xalign(0.0);
+    popover.set_child(Some(&label));
+
+    let motion = EventControllerMotion::new();
+    {
+        let popover = popover.clone();
+        let label = label.clone();
+        motion.connect_enter(move |_, _, _| {
+            if !label.text().is_empty() {
+                popover.popup();
+            }
+        });
+    }
+    {
+        let popover = popover.clone();
+        motion.connect_leave(move |_| {
+            popover.popdown();
+        });
+    }
+    root.add_controller(motion);
+
+    PlayerctlTooltipUi { label }
 }
 
 fn reset_carousel_state(carousel: &PlayerctlCarouselUi, text: &str) {
