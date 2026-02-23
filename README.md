@@ -90,6 +90,7 @@ Styling config supports:
 - Module configuration and styling selectors: [`docs/modules.md`](./docs/modules.md)
 - Developer architecture and extension notes: [`docs/developer.md`](./docs/developer.md)
   - Includes debug env vars such as `VIBAR_DEBUG_DOM=1` for widget/CSS selector discovery.
+- Playerctl implementation is organized under [`src/modules/playerctl/`](./src/modules/playerctl/) with focused submodules (`config`, `backend`, `model`, `ui`).
 
 ## Acknowledgements
 

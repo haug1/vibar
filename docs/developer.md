@@ -8,7 +8,7 @@ This document contains implementation-facing details that are intentionally kept
 - `src/modules/mod.rs` stores raw module config entries:
   - `type: String`
   - module-specific fields as a dynamic map (`serde_json::Map<String, Value>`)
-- Each module file owns:
+- Each module file (or module directory) owns:
   - its `MODULE_TYPE` constant
   - typed config struct
   - config parsing from raw map
@@ -17,6 +17,7 @@ This document contains implementation-facing details that are intentionally kept
 - `group` is a composite module that recursively calls `build_module(...)` for child entries.
 - `exec` supports Waybar-compatible output parsing (`i3blocks` line mode and JSON `text`/`class`) and applies dynamic output classes each update.
 - `playerctl` reads media metadata/status from MPRIS over DBus (`zbus`), updates on DBus signals (`NameOwnerChanged` + `PropertiesChanged`) plus a lightweight periodic snapshot for position freshness, supports placeholder-based output formatting, optional fixed-width clipping (`fixed-width`) with configurable marquee mode (`marquee`: `off`/`hover`/`open`/`always`) for long metadata text, and optionally exposes a GTK popover for transport controls + `SetPosition` seeking with progress timestamps.
+  - Implementation layout: `src/modules/playerctl/mod.rs` orchestration + `src/modules/playerctl/config.rs` (schema/defaults), `src/modules/playerctl/backend.rs` (MPRIS DBus backend), `src/modules/playerctl/model.rs` (pure metadata/format helpers), `src/modules/playerctl/ui.rs` (GTK tooltip/carousel/controls UI wiring).
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`.
 - Config loading prefers `~/.config/vibar/config.jsonc`, then falls back to `./config.jsonc`.
 - Top-level style config supports layered CSS (`style.load-default` + `style.path`).

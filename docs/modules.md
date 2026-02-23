@@ -226,6 +226,7 @@ Format placeholders:
 Behavior:
 
 - Event-driven updates from MPRIS over DBus (`NameOwnerChanged` + `PropertiesChanged`).
+- Internal implementation is split under `src/modules/playerctl/` by responsibility (`config`, `backend`, `model`, `ui`) to keep behavior-focused codepaths isolated.
 - Active player selection policy: `playing` > `paused` > `stopped`, then stable bus-name sort.
 - If no matching player exists, module text falls back to `no_player_text`.
 - With `fixed-width` set, the module keeps a bounded width.

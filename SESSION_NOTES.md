@@ -24,6 +24,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Clock module supports optional `click` / `on-click` shell actions
 - PulseAudio module supports click actions, Waybar-style format keys, scroll volume, and event-driven native `libpulse` updates
 - Playerctl module is event-driven via MPRIS DBus signals with lightweight periodic position refresh, supports placeholders (`{status}`, `{status_icon}`, `{player}`, `{artist}`, `{album}`, `{title}`), optional fixed-width clipping (`fixed-width`) with configurable marquee mode (`marquee`: `off|hover|open|always`, default `off`), dynamic state CSS classes (`status-playing|status-paused|status-stopped|no-player`), visibility controls (`hide-when-idle`, `show-when-paused`), and optional `controls` popover (`Previous`/`PlayPause`/`Next` + guarded precise seek via `SetPosition` + `MM:ss` progress/length labels)
+- Playerctl source is modularized under `src/modules/playerctl/` (`mod.rs` orchestrator + `config.rs`, `backend.rs`, `model.rs`, `ui.rs`) instead of a single large file
 - Tray context menu supports DBusMenu toggle indicators (check/radio states) via `toggle-type`/`toggle-state` metadata
 - Exec module supports optional `click` / `on-click` shell actions
 - Exec module parses Waybar-compatible output (`i3blocks` line format + JSON `text`/`class`) and applies dynamic CSS classes from output
