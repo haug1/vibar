@@ -233,8 +233,10 @@ Behavior:
 - If `marquee=hover`, `marquee=open`, or `marquee=always`, long text scrolls smoothly by pixel offset (stable with proportional fonts).
 - `marquee=off` keeps clipped static text and avoids continuous animation overhead.
 - `marquee=open` animates only while the controls popover is open (`controls.enabled=true`).
-- Playerctl text is always exposed as a tooltip, so hover shows full rendered metadata even while clipped/scrolled.
-- When `controls.enabled=true`, left-click opens a popover with transport buttons and optional seek slider.
+- Playerctl text is exposed as a hover tooltip while controls are closed, so clipped/scrolled text remains discoverable.
+- When `controls.enabled=true`, left-click opens a popover with centered transport buttons on top, a key/value metadata list (`Status`, `Player`, `Artist`, `Album`, `Title`), and optional seek slider.
+- While the controls popover is open, hover tooltip display is temporarily suppressed to avoid UI overlap.
+- Controls popover width follows the module width; long metadata values wrap within that width (`WordChar` wrapping).
 - Seek writes use MPRIS `SetPosition` (guarded by `CanSeek`, track id presence, and positive duration).
 - Slider updates ignore backend refresh while scrubbing to avoid seek feedback loops.
 - Controls popover seek UI includes `MM:ss` progress labels (current position left, total length right).
@@ -251,7 +253,7 @@ Styling:
 - State classes: `.status-playing`, `.status-paused`, `.status-stopped`, `.no-player`
 - Fixed-width carousel classes: `.playerctl-fixed-width`, `.playerctl-carousel`
 - Click-enabled modules include: `.clickable` (both shell-click and controls-enabled cases)
-- Controls popover classes: `.playerctl-controls-popover`, `.playerctl-controls-content`, `.playerctl-controls-row`, `.playerctl-control-button`, `.playerctl-seek-scale`, `.playerctl-seek-time-row`, `.playerctl-seek-time`
+- Controls popover classes: `.playerctl-controls-popover`, `.playerctl-controls-content`, `.playerctl-controls-row`, `.playerctl-control-button`, `.playerctl-controls-metadata-grid`, `.playerctl-controls-metadata-key`, `.playerctl-controls-metadata-value`, `.playerctl-seek-scale`, `.playerctl-seek-time-row`, `.playerctl-seek-time`
 - Optional extra class via `class` field.
 
 ## `exec`

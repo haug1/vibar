@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{
-    Box as GtkBox, Button, DrawingArea, EventControllerMotion, GestureClick, Label, Orientation,
-    Overlay, Popover, PositionType, Scale, Widget,
+    Box as GtkBox, Button, DrawingArea, EventControllerMotion, GestureClick, Grid, Label,
+    Orientation, Overlay, Popover, PositionType, Scale, Widget,
 };
 
 use crate::modules::apply_css_classes;
@@ -20,6 +20,11 @@ use super::model::{format_timestamp_micros, metadata_seek_ratio, PlayerctlMetada
 #[derive(Clone)]
 pub(super) struct PlayerctlControlsUi {
     pub(super) popover: Popover,
+    metadata_status_value: Label,
+    metadata_player_value: Label,
+    metadata_artist_value: Label,
+    metadata_album_value: Label,
+    metadata_title_value: Label,
     previous_button: Button,
     play_pause_button: Button,
     next_button: Button,
@@ -153,7 +158,10 @@ pub(super) fn set_playerctl_text(
     }
 }
 
-pub(super) fn build_playerctl_tooltip(root: &Overlay) -> PlayerctlTooltipUi {
+pub(super) fn build_playerctl_tooltip(
+    root: &Overlay,
+    controls_popover: Option<&Popover>,
+) -> PlayerctlTooltipUi {
     let popover = Popover::new();
     popover.add_css_class("playerctl-tooltip-popover");
     popover.set_has_arrow(true);
@@ -168,12 +176,27 @@ pub(super) fn build_playerctl_tooltip(root: &Overlay) -> PlayerctlTooltipUi {
     label.set_xalign(0.0);
     popover.set_child(Some(&label));
 
+    let tooltip_suppressed = Arc::new(AtomicBool::new(false));
+    if let Some(controls_popover) = controls_popover {
+        let tooltip_suppressed_on_show = tooltip_suppressed.clone();
+        let tooltip_popover = popover.clone();
+        controls_popover.connect_show(move |_| {
+            tooltip_suppressed_on_show.store(true, Ordering::Relaxed);
+            tooltip_popover.popdown();
+        });
+        let tooltip_suppressed_on_hide = tooltip_suppressed.clone();
+        controls_popover.connect_hide(move |_| {
+            tooltip_suppressed_on_hide.store(false, Ordering::Relaxed);
+        });
+    }
+
     let motion = EventControllerMotion::new();
     {
         let popover = popover.clone();
         let label = label.clone();
+        let tooltip_suppressed = tooltip_suppressed.clone();
         motion.connect_enter(move |_, _, _| {
-            if !label.text().is_empty() {
+            if !tooltip_suppressed.load(Ordering::Relaxed) && !label.text().is_empty() {
                 popover.popup();
             }
         });
@@ -333,13 +356,24 @@ pub(super) fn build_controls_ui(root: &Overlay, show_seek: bool) -> PlayerctlCon
     popover.set_has_arrow(true);
     popover.set_position(PositionType::Top);
     popover.set_parent(root);
+    {
+        let root = root.clone();
+        let popover_for_callback = popover.clone();
+        popover.connect_show(move |_| {
+            // Keep controls width in lockstep with the module width.
+            popover_for_callback.set_size_request(root.allocated_width().max(1), -1);
+        });
+    }
 
     let content = GtkBox::new(Orientation::Vertical, 6);
     content.add_css_class("playerctl-controls-content");
+    content.set_halign(gtk::Align::Fill);
+    content.set_hexpand(true);
     popover.set_child(Some(&content));
 
     let buttons_row = GtkBox::new(Orientation::Horizontal, 6);
     buttons_row.add_css_class("playerctl-controls-row");
+    buttons_row.set_halign(gtk::Align::Center);
     content.append(&buttons_row);
 
     let previous_button = Button::with_label("");
@@ -353,6 +387,30 @@ pub(super) fn build_controls_ui(root: &Overlay, show_seek: bool) -> PlayerctlCon
     let next_button = Button::with_label("");
     next_button.add_css_class("playerctl-control-button");
     buttons_row.append(&next_button);
+
+    let metadata_grid = Grid::new();
+    metadata_grid.add_css_class("playerctl-controls-metadata-grid");
+    metadata_grid.set_row_spacing(4);
+    metadata_grid.set_column_spacing(10);
+    metadata_grid.set_halign(gtk::Align::Fill);
+    metadata_grid.set_hexpand(true);
+    content.append(&metadata_grid);
+
+    let (status_key, metadata_status_value) = build_controls_metadata_labels("Status");
+    metadata_grid.attach(&status_key, 0, 0, 1, 1);
+    metadata_grid.attach(&metadata_status_value, 1, 0, 1, 1);
+    let (player_key, metadata_player_value) = build_controls_metadata_labels("Player");
+    metadata_grid.attach(&player_key, 0, 1, 1, 1);
+    metadata_grid.attach(&metadata_player_value, 1, 1, 1, 1);
+    let (artist_key, metadata_artist_value) = build_controls_metadata_labels("Artist");
+    metadata_grid.attach(&artist_key, 0, 2, 1, 1);
+    metadata_grid.attach(&metadata_artist_value, 1, 2, 1, 1);
+    let (album_key, metadata_album_value) = build_controls_metadata_labels("Album");
+    metadata_grid.attach(&album_key, 0, 3, 1, 1);
+    metadata_grid.attach(&metadata_album_value, 1, 3, 1, 1);
+    let (title_key, metadata_title_value) = build_controls_metadata_labels("Title");
+    metadata_grid.attach(&title_key, 0, 4, 1, 1);
+    metadata_grid.attach(&metadata_title_value, 1, 4, 1, 1);
 
     let seek_scale = Scale::with_range(Orientation::Horizontal, 0.0, 1.0, 0.001);
     seek_scale.add_css_class("playerctl-seek-scale");
@@ -407,6 +465,11 @@ pub(super) fn build_controls_ui(root: &Overlay, show_seek: bool) -> PlayerctlCon
 
     PlayerctlControlsUi {
         popover,
+        metadata_status_value,
+        metadata_player_value,
+        metadata_artist_value,
+        metadata_album_value,
+        metadata_title_value,
         previous_button,
         play_pause_button,
         next_button,
@@ -526,12 +589,20 @@ pub(super) fn wire_controls_actions(controls_ui: PlayerctlControlsUi) {
 pub(super) fn refresh_controls_ui(
     controls_ui: &PlayerctlControlsUi,
     metadata: Option<&PlayerctlMetadata>,
+    fallback_status_text: &str,
 ) {
     if let Ok(mut slot) = controls_ui.current_metadata.lock() {
         *slot = metadata.cloned();
     }
 
     let Some(metadata) = metadata else {
+        controls_ui
+            .metadata_status_value
+            .set_text(fallback_status_text);
+        controls_ui.metadata_player_value.set_text("—");
+        controls_ui.metadata_artist_value.set_text("—");
+        controls_ui.metadata_album_value.set_text("—");
+        controls_ui.metadata_title_value.set_text("—");
         controls_ui.previous_button.set_sensitive(false);
         controls_ui.play_pause_button.set_sensitive(false);
         controls_ui.play_pause_button.set_label("");
@@ -561,6 +632,21 @@ pub(super) fn refresh_controls_ui(
         ""
     };
     controls_ui.play_pause_button.set_label(toggle_icon);
+    controls_ui
+        .metadata_status_value
+        .set_text(metadata.status.as_str());
+    controls_ui
+        .metadata_player_value
+        .set_text(metadata.player.as_str());
+    controls_ui
+        .metadata_artist_value
+        .set_text(non_empty_or_dash(&metadata.artist));
+    controls_ui
+        .metadata_album_value
+        .set_text(non_empty_or_dash(&metadata.album));
+    controls_ui
+        .metadata_title_value
+        .set_text(non_empty_or_dash(&metadata.title));
 
     let can_seek = metadata.can_seek
         && metadata.length_micros.is_some_and(|length| length > 0)
@@ -601,6 +687,14 @@ pub(super) fn refresh_controls_ui(
         .set_text(&format_timestamp_micros(metadata.length_micros));
 }
 
+pub(super) fn sync_controls_width(controls_ui: &PlayerctlControlsUi, module_width_px: i32) {
+    let width = module_width_px.max(1);
+    controls_ui.popover.set_size_request(width, -1);
+    if let Some(child) = controls_ui.popover.child() {
+        child.set_size_request(width, -1);
+    }
+}
+
 fn reset_carousel_state(carousel: &PlayerctlCarouselUi, text: &str) {
     let layout = carousel.area.create_pango_layout(Some(text));
     let (text_width_px, text_height_px) = layout.pixel_size();
@@ -636,6 +730,34 @@ fn fixed_height_px_from_label_probe(extra_classes: Option<&str>) -> i32 {
 
 fn carousel_gap_px() -> f64 {
     42.0
+}
+
+fn build_controls_metadata_labels(key: &str) -> (Label, Label) {
+    let key_label = Label::new(Some(key));
+    key_label.add_css_class("playerctl-controls-metadata-key");
+    key_label.set_xalign(0.0);
+    key_label.set_halign(gtk::Align::Start);
+    key_label.set_hexpand(false);
+
+    let value_label = Label::new(Some("—"));
+    value_label.add_css_class("playerctl-controls-metadata-value");
+    value_label.set_xalign(0.0);
+    value_label.set_justify(gtk::Justification::Left);
+    value_label.set_halign(gtk::Align::Fill);
+    value_label.set_hexpand(true);
+    value_label.set_max_width_chars(1);
+    value_label.set_wrap(true);
+    value_label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+
+    (key_label, value_label)
+}
+
+fn non_empty_or_dash(text: &str) -> &str {
+    if text.is_empty() {
+        "—"
+    } else {
+        text
+    }
 }
 
 #[allow(deprecated)]

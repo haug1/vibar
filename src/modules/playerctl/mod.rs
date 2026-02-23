@@ -24,7 +24,7 @@ use model::{render_format, should_show_metadata, status_css_class, BackendUpdate
 use ui::{
     build_carousel_ui, build_controls_ui, build_playerctl_tooltip, install_carousel_animation,
     install_carousel_hover_tracking, install_carousel_open_tracking, install_controls_open_gesture,
-    refresh_controls_ui, set_playerctl_text, wire_controls_actions,
+    refresh_controls_ui, set_playerctl_text, sync_controls_width, wire_controls_actions,
 };
 
 const PLAYERCTL_STATE_CLASSES: [&str; 4] = [
@@ -72,8 +72,6 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
     apply_css_classes(&root, config.class.as_deref());
     root.set_tooltip_text(None);
 
-    let tooltip_ui = build_playerctl_tooltip(&root);
-
     let label = Label::new(None);
     label.set_xalign(0.0);
     label.set_focusable(false);
@@ -101,6 +99,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
     } else {
         None
     };
+    let tooltip_ui = build_playerctl_tooltip(&root, controls_ui.as_ref().map(|ui| &ui.popover));
 
     if config.interval_secs != default_playerctl_interval() {
         eprintln!(
@@ -129,33 +128,44 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
             while let Ok(update) = receiver.try_recv() {
                 let (text, visibility, state_class) = match update {
                     BackendUpdate::Snapshot(Some(metadata)) => {
+                        let text = render_format(&format, &metadata);
                         if let Some(controls) = &controls_ui {
-                            refresh_controls_ui(controls, Some(&metadata));
+                            refresh_controls_ui(controls, Some(&metadata), "");
                         }
                         (
-                            render_format(&format, &metadata),
+                            text,
                             should_show_metadata(Some(&metadata), hide_when_idle, show_when_paused),
                             status_css_class(&metadata.status),
                         )
                     }
-                    BackendUpdate::Snapshot(None) => (
-                        {
-                            if let Some(controls) = &controls_ui {
-                                refresh_controls_ui(controls, None);
-                            }
-                            no_player_text.clone()
-                        },
-                        should_show_metadata(None, hide_when_idle, show_when_paused),
-                        "no-player",
-                    ),
-                    BackendUpdate::Error(err) => {
+                    BackendUpdate::Snapshot(None) => {
+                        let text = no_player_text.clone();
                         if let Some(controls) = &controls_ui {
-                            refresh_controls_ui(controls, None);
+                            refresh_controls_ui(controls, None, &text);
                         }
-                        (format!("playerctl error: {err}"), true, "no-player")
+                        (
+                            text,
+                            should_show_metadata(None, hide_when_idle, show_when_paused),
+                            "no-player",
+                        )
+                    }
+                    BackendUpdate::Error(err) => {
+                        let text = format!("playerctl error: {err}");
+                        if let Some(controls) = &controls_ui {
+                            refresh_controls_ui(controls, None, &text);
+                        }
+                        (text, true, "no-player")
                     }
                 };
                 set_playerctl_text(&label, &tooltip_ui, carousel.as_ref(), &text);
+                if let Some(controls) = &controls_ui {
+                    let width = root
+                        .width_request()
+                        .max(root.allocated_width())
+                        .max(label.allocated_width())
+                        .max(1);
+                    sync_controls_width(controls, width);
+                }
                 root.set_visible(visibility);
                 apply_state_class(&root, state_class);
             }
