@@ -114,11 +114,20 @@ Styling:
 
 ## `sway/workspaces`
 
-Minimal schema:
+Schema:
 
 ```json
-{ "type": "sway/workspaces" }
+{
+  "type": "sway/workspaces",
+  "class": "optional-css-classes",
+  "button-class": "optional-workspace-button-css-classes"
+}
 ```
+
+Fields:
+
+- `class` (optional): extra CSS class(es) on the module container (whitespace-separated).
+- `button-class` / `button_class` (optional): extra CSS class(es) on each workspace button (whitespace-separated).
 
 Behavior:
 
@@ -132,6 +141,8 @@ Styling:
 - Container classes: `.module.workspaces`
 - Per-workspace button class: `.menu-button`
 - Active state classes: `.menu-button.active`, `.menu-button.workspace-active`
+- Optional extra container class via `class` field.
+- Optional extra per-button class via `button-class` field.
 
 ## `sway/window`
 

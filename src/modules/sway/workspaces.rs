@@ -9,10 +9,15 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use swayipc::{Connection, EventType};
 
-use crate::modules::{ModuleBuildContext, ModuleConfig, ModuleFactory};
+use crate::modules::{apply_css_classes, ModuleBuildContext, ModuleConfig, ModuleFactory};
 
 #[derive(Debug, Deserialize, Clone, Default)]
-pub(crate) struct WorkspaceConfig {}
+pub(crate) struct WorkspaceConfig {
+    #[serde(default)]
+    pub(crate) class: Option<String>,
+    #[serde(rename = "button-class", alias = "button_class", default)]
+    pub(crate) button_class: Option<String>,
+}
 
 pub(crate) struct SwayWorkspaceFactory;
 
@@ -25,8 +30,13 @@ impl ModuleFactory for SwayWorkspaceFactory {
     }
 
     fn init(&self, config: &ModuleConfig, context: &ModuleBuildContext) -> Result<Widget, String> {
-        let _ = parse_config(config)?;
-        Ok(build_workspaces_module(context.monitor_connector.clone()).upcast())
+        let parsed = parse_config(config)?;
+        Ok(build_workspaces_module(
+            context.monitor_connector.clone(),
+            parsed.class,
+            parsed.button_class,
+        )
+        .upcast())
     }
 }
 
@@ -46,27 +56,44 @@ fn parse_config(module: &ModuleConfig) -> Result<WorkspaceConfig, String> {
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-pub(crate) fn build_workspaces_module(output_filter: Option<String>) -> GtkBox {
+pub(crate) fn build_workspaces_module(
+    output_filter: Option<String>,
+    class: Option<String>,
+    button_class: Option<String>,
+) -> GtkBox {
     let container = GtkBox::new(Orientation::Horizontal, 4);
     container.add_css_class("module");
     container.add_css_class("workspaces");
+    apply_css_classes(&container, class.as_deref());
 
     let (mut signal_rx, signal_tx) = match std::os::unix::net::UnixStream::pair() {
         Ok(pair) => pair,
         Err(err) => {
             eprintln!("vibar/workspaces: failed to create event signal pipe: {err}");
-            refresh_workspaces(&container, output_filter.as_deref());
+            refresh_workspaces(
+                &container,
+                output_filter.as_deref(),
+                button_class.as_deref(),
+            );
             return container;
         }
     };
     if let Err(err) = signal_rx.set_nonblocking(true) {
         eprintln!("vibar/workspaces: failed to set nonblocking event signal pipe: {err}");
-        refresh_workspaces(&container, output_filter.as_deref());
+        refresh_workspaces(
+            &container,
+            output_filter.as_deref(),
+            button_class.as_deref(),
+        );
         return container;
     }
 
     start_workspace_event_listener(signal_tx);
-    refresh_workspaces(&container, output_filter.as_deref());
+    refresh_workspaces(
+        &container,
+        output_filter.as_deref(),
+        button_class.as_deref(),
+    );
 
     // Refresh only when the sway listener emits an event callback signal.
     glib::source::unix_fd_add_local(
@@ -75,6 +102,7 @@ pub(crate) fn build_workspaces_module(output_filter: Option<String>) -> GtkBox {
         {
             let container = container.clone();
             let output_filter = output_filter.clone();
+            let button_class = button_class.clone();
             move |_, condition| {
                 if condition.intersects(glib::IOCondition::HUP | glib::IOCondition::ERR) {
                     if workspace_debug_enabled() {
@@ -103,7 +131,11 @@ pub(crate) fn build_workspaces_module(output_filter: Option<String>) -> GtkBox {
                 }
 
                 if had_event {
-                    refresh_workspaces(&container, output_filter.as_deref());
+                    refresh_workspaces(
+                        &container,
+                        output_filter.as_deref(),
+                        button_class.as_deref(),
+                    );
                 }
                 ControlFlow::Continue
             }
@@ -153,7 +185,7 @@ fn start_workspace_event_listener(mut signal_tx: std::os::unix::net::UnixStream)
     });
 }
 
-fn refresh_workspaces(container: &GtkBox, output_filter: Option<&str>) {
+fn refresh_workspaces(container: &GtkBox, output_filter: Option<&str>, button_class: Option<&str>) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
@@ -213,6 +245,7 @@ fn refresh_workspaces(container: &GtkBox, output_filter: Option<&str>) {
     for ws in workspaces {
         let button = Button::with_label(&ws.name);
         button.add_css_class("menu-button");
+        apply_css_classes(&button, button_class);
         button.set_focusable(false);
 
         if focused_workspace
@@ -277,4 +310,41 @@ fn workspace_debug_enabled() -> bool {
     std::env::var("VIBAR_DEBUG_WORKSPACES")
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Map};
+
+    use super::*;
+
+    #[test]
+    fn parse_config_rejects_wrong_module_type() {
+        let module = ModuleConfig::new("clock", Map::new());
+        let err = parse_config(&module).expect_err("wrong type should fail");
+        assert!(err.contains("expected module type 'sway/workspaces'"));
+    }
+
+    #[test]
+    fn parse_config_supports_button_class_aliases() {
+        let kebab = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "button-class": "foo bar"
+            }))
+            .expect("module config map should parse"),
+        );
+        let kebab_cfg = parse_config(&kebab).expect("kebab config should parse");
+        assert_eq!(kebab_cfg.button_class.as_deref(), Some("foo bar"));
+
+        let snake = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "button_class": "baz"
+            }))
+            .expect("module config map should parse"),
+        );
+        let snake_cfg = parse_config(&snake).expect("snake config should parse");
+        assert_eq!(snake_cfg.button_class.as_deref(), Some("baz"));
+    }
 }

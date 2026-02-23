@@ -50,6 +50,7 @@ make ci
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system (`docs/modules.md`)
 - Sway modules for workspaces and active-window title (`sway/workspaces`, `sway/window`)
+- Workspace module supports container and per-workspace-button CSS class overrides
 - Config file search order:
   - `~/.config/vibar/config.jsonc`
   - `./config.jsonc` (fallback)

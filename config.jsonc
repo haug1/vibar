@@ -12,7 +12,15 @@
     // "path": "~/.config/vibar/style.css"
   },
   "areas": {
-    "left": [{ "type": "sway/workspaces" }],
+    "left": [
+      {
+        "type": "sway/workspaces",
+        // Optional extra class on the module container:
+        // "class": "v-pill",
+        // Optional extra class on each workspace button:
+        // "button-class": "workspace-item",
+      },
+    ],
     "center": [{ "type": "sway/window" }],
     "right": [
       {

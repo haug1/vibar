@@ -18,6 +18,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - 3 layout areas: `left`, `center`, `right`
 - Config-driven module system (canonical reference: `docs/modules.md`)
 - Sway integration includes `sway/workspaces` and `sway/window` (focused window title gated per output)
+- `sway/workspaces` supports container `class` plus per-button `button-class` style overrides
 - Config lookup order: `~/.config/vibar/config.jsonc` then `./config.jsonc`
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
