@@ -57,6 +57,7 @@ pub(super) struct PlayerctlTooltipUi {
 #[derive(Debug)]
 struct PlayerctlCarouselState {
     full_text: String,
+    full_markup: String,
     layout: Option<gtk::pango::Layout>,
     content_width_px: f64,
     viewport_width_px: i32,
@@ -100,6 +101,7 @@ pub(super) fn build_carousel_ui(
 
     let state = Rc::new(RefCell::new(PlayerctlCarouselState {
         full_text: String::new(),
+        full_markup: String::new(),
         layout: None,
         content_width_px: 0.0,
         viewport_width_px,
@@ -161,19 +163,20 @@ pub(super) fn set_playerctl_text(
     label: &Label,
     tooltip_ui: &PlayerctlTooltipUi,
     carousel: Option<&PlayerctlCarouselUi>,
-    text: &str,
+    plain_text: &str,
+    markup_text: &str,
 ) {
-    tooltip_ui.label.set_text(text);
+    tooltip_ui.label.set_markup(markup_text);
     tooltip_ui.show_on_hover.store(false, Ordering::Relaxed);
 
     if let Some(carousel) = carousel {
         let should_reset = {
             let state = carousel.state.borrow();
-            state.full_text != text
+            state.full_text != plain_text || state.full_markup != markup_text
         };
 
         if should_reset {
-            reset_carousel_state(carousel, text);
+            reset_carousel_state(carousel, plain_text, markup_text);
             carousel.area.queue_draw();
         }
 
@@ -185,7 +188,7 @@ pub(super) fn set_playerctl_text(
             .show_on_hover
             .store(is_truncated, Ordering::Relaxed);
     } else {
-        label.set_text(text);
+        label.set_markup(markup_text);
     }
 }
 
@@ -734,14 +737,25 @@ pub(super) fn sync_controls_width(controls_ui: &PlayerctlControlsUi, module_widt
     }
 }
 
-fn reset_carousel_state(carousel: &PlayerctlCarouselUi, text: &str) {
-    let layout = carousel.area.create_pango_layout(Some(text));
+fn reset_carousel_state(carousel: &PlayerctlCarouselUi, plain_text: &str, markup_text: &str) {
+    let layout = carousel.area.create_pango_layout(None);
+    match gtk::pango::parse_markup(markup_text, '\0') {
+        Ok((attrs, text, _)) => {
+            layout.set_text(&text);
+            layout.set_attributes(Some(&attrs));
+        }
+        Err(_) => {
+            layout.set_text(plain_text);
+            layout.set_attributes(None);
+        }
+    }
     let (text_width_px, text_height_px) = layout.pixel_size();
     let content_width_px = text_width_px.max(1);
     let viewport_width_px = content_width_px.min(carousel.width_limit_px);
 
     let mut state = carousel.state.borrow_mut();
-    state.full_text = text.to_string();
+    state.full_text = plain_text.to_string();
+    state.full_markup = markup_text.to_string();
     state.layout = Some(layout);
     state.content_width_px = content_width_px as f64;
     state.viewport_width_px = viewport_width_px;

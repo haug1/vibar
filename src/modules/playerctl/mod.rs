@@ -12,7 +12,8 @@ use gtk::{Label, Overlay, Widget};
 use serde_json::Value;
 
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+    apply_css_classes, attach_primary_click_command, escape_markup_text, ModuleBuildContext,
+    ModuleConfig,
 };
 
 use super::ModuleFactory;
@@ -20,7 +21,9 @@ use backend::run_event_backend;
 use config::{
     default_playerctl_interval, PlayerctlConfig, PlayerctlMarqueeMode, PlayerctlViewConfig,
 };
-use model::{render_format, should_show_metadata, status_css_class, BackendUpdate};
+use model::{
+    render_format, render_markup_format, should_show_metadata, status_css_class, BackendUpdate,
+};
 use ui::{
     build_carousel_ui, build_controls_ui, build_playerctl_tooltip, install_carousel_animation,
     install_carousel_hover_tracking, install_carousel_open_tracking, install_controls_open_gesture,
@@ -126,38 +129,49 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
         let tooltip_ui = tooltip_ui.clone();
         move || {
             while let Ok(update) = receiver.try_recv() {
-                let (text, visibility, state_class) = match update {
+                let (plain_text, markup_text, visibility, state_class) = match update {
                     BackendUpdate::Snapshot(Some(metadata)) => {
-                        let text = render_format(&format, &metadata);
+                        let plain_text = render_format(&format, &metadata);
+                        let markup_text = render_markup_format(&format, &metadata);
                         if let Some(controls) = &controls_ui {
                             refresh_controls_ui(controls, Some(&metadata), "");
                         }
                         (
-                            text,
+                            plain_text,
+                            markup_text,
                             should_show_metadata(Some(&metadata), hide_when_idle, show_when_paused),
                             status_css_class(&metadata.status),
                         )
                     }
                     BackendUpdate::Snapshot(None) => {
-                        let text = no_player_text.clone();
+                        let plain_text = no_player_text.clone();
+                        let markup_text = escape_markup_text(&plain_text);
                         if let Some(controls) = &controls_ui {
-                            refresh_controls_ui(controls, None, &text);
+                            refresh_controls_ui(controls, None, &plain_text);
                         }
                         (
-                            text,
+                            plain_text,
+                            markup_text,
                             should_show_metadata(None, hide_when_idle, show_when_paused),
                             "no-player",
                         )
                     }
                     BackendUpdate::Error(err) => {
-                        let text = format!("playerctl error: {err}");
+                        let plain_text = format!("playerctl error: {err}");
+                        let markup_text = escape_markup_text(&plain_text);
                         if let Some(controls) = &controls_ui {
-                            refresh_controls_ui(controls, None, &text);
+                            refresh_controls_ui(controls, None, &plain_text);
                         }
-                        (text, true, "no-player")
+                        (plain_text, markup_text, true, "no-player")
                     }
                 };
-                set_playerctl_text(&label, &tooltip_ui, carousel.as_ref(), &text);
+                set_playerctl_text(
+                    &label,
+                    &tooltip_ui,
+                    carousel.as_ref(),
+                    &plain_text,
+                    &markup_text,
+                );
                 if let Some(controls) = &controls_ui {
                     let width = root
                         .width_request()

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::modules::render_markup_template;
 use zbus::zvariant::{ObjectPath, OwnedValue};
 
 #[derive(Debug, Clone)]
@@ -124,6 +125,20 @@ pub(super) fn render_format(format: &str, metadata: &PlayerctlMetadata) -> Strin
         .replace("{artist}", &metadata.artist)
         .replace("{album}", &metadata.album)
         .replace("{title}", &metadata.title)
+}
+
+pub(super) fn render_markup_format(format: &str, metadata: &PlayerctlMetadata) -> String {
+    render_markup_template(
+        format,
+        &[
+            ("{status}", &metadata.status),
+            ("{status_icon}", metadata.status_icon),
+            ("{player}", &metadata.player),
+            ("{artist}", &metadata.artist),
+            ("{album}", &metadata.album),
+            ("{title}", &metadata.title),
+        ],
+    )
 }
 
 pub(super) fn should_show_metadata(
@@ -273,6 +288,36 @@ mod tests {
             &metadata,
         );
         assert_eq!(text, " Boards of Canada - Roygbiv (spotify) [paused]");
+    }
+
+    #[test]
+    fn render_markup_format_escapes_placeholder_values() {
+        let metadata = PlayerctlMetadata {
+            status: "paused".to_string(),
+            status_icon: "",
+            player: "spotify".to_string(),
+            artist: "Boards <Canada>".to_string(),
+            album: "Music Has the Right to Children".to_string(),
+            title: "Roy&giv".to_string(),
+            position_micros: None,
+            length_micros: None,
+            can_go_previous: false,
+            can_go_next: false,
+            can_play: false,
+            can_pause: false,
+            can_seek: false,
+            track_id: None,
+            bus_name: "org.mpris.MediaPlayer2.spotify".to_string(),
+        };
+
+        let text = render_markup_format(
+            "<span style=\"italic\">{artist} - {title}</span>",
+            &metadata,
+        );
+        assert_eq!(
+            text,
+            "<span style=\"italic\">Boards &lt;Canada&gt; - Roy&amp;giv</span>"
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ This document contains implementation-facing details that are intentionally kept
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`.
 - `sway/workspaces` supports module-level `class` and per-button `button-class`/`button_class` style hooks.
 - `sway/mode` tracks active sway binding mode (`get_binding_state`) and hides itself when mode is `default`.
-- Markup-capable format modules (`sway/mode`, `cpu`, `memory`, `disk`, `pulseaudio`) render via Pango markup and escape replacement values before insertion.
+- Markup-capable format modules (`sway/mode`, `playerctl`, `cpu`, `memory`, `disk`, `pulseaudio`) render via Pango markup and escape replacement values before insertion.
 - Config loading prefers `~/.config/vibar/config.jsonc`, then falls back to `./config.jsonc`.
 - Top-level style config supports layered CSS (`style.load-default` + `style.path`).
 - Embedded default stylesheet includes small utility classes (`v-pill`, `v-square`) for quick module appearance tuning from config.

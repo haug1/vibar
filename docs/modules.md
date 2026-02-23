@@ -263,6 +263,8 @@ Schema:
 Fields:
 
 - `format` (optional): output format template.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
   - Default: `{status_icon} {title}`
 - `max-width` / `max_width` (optional): maximum visible width in character cells.
   - If set, long text is clipped to this width, but short text keeps its natural width.
