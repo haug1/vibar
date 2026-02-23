@@ -10,23 +10,25 @@ Top-level config uses three layout areas:
 {
   "style": {
     "load-default": true,
-    "path": "~/.config/vibar/style.css"
+    "path": "~/.config/vibar/style.css",
   },
   "areas": {
     "left": [{ "type": "sway/workspaces" }],
-    "center": [{ "type": "playerctl", "format": "{status_icon} {artist} - {title}" }],
+    "center": [
+      { "type": "playerctl", "format": "{status_icon} {artist} - {title}" },
+    ],
     "right": [
       {
         "type": "group",
         "class": "media-group",
         "drawer": true,
-        "modules": [{ "type": "pulseaudio" }, { "type": "tray" }]
+        "modules": [{ "type": "pulseaudio" }, { "type": "tray" }],
       },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
       { "type": "cpu", "format": "{used_percentage}% ", "interval_secs": 1 },
-      { "type": "clock" }
-    ]
-  }
+      { "type": "clock" },
+    ],
+  },
 }
 ```
 
@@ -191,7 +193,7 @@ Fields:
   - `0` disables fixed-width behavior.
 - `marquee` (optional): carousel animation mode for overflow text when `fixed-width` is set.
   - Supported values: `off`, `hover`, `open`, `always`
-  - Default: `off`
+  - Default: `off` (while animating, app will use a lot more resources, so it's disabled default)
 - `player` (optional): player selector passed to `playerctl --player <name>`.
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `1`
