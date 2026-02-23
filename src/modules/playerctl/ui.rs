@@ -14,7 +14,7 @@ use gtk::{
 use crate::modules::apply_css_classes;
 
 use super::backend::{call_player_method, call_set_position};
-use super::config::{PlayerctlControlsOpenMode, PlayerctlMarqueeMode, PlayerctlWidthMode};
+use super::config::{PlayerctlControlsOpenMode, PlayerctlMarqueeMode};
 use super::model::{format_timestamp_micros, metadata_seek_ratio, PlayerctlMetadata};
 
 #[derive(Clone)]
@@ -42,7 +42,6 @@ pub(super) struct PlayerctlControlsUi {
 #[derive(Clone)]
 pub(super) struct PlayerctlCarouselUi {
     root: Overlay,
-    width_mode: PlayerctlWidthMode,
     width_limit_px: i32,
     pub(super) area: DrawingArea,
     pub(super) marquee: PlayerctlMarqueeMode,
@@ -71,8 +70,7 @@ struct PlayerctlCarouselState {
 
 pub(super) fn build_carousel_ui(
     root: &Overlay,
-    width_chars: u32,
-    width_mode: PlayerctlWidthMode,
+    max_width_chars: u32,
     extra_classes: Option<&str>,
     marquee: PlayerctlMarqueeMode,
 ) -> PlayerctlCarouselUi {
@@ -86,12 +84,8 @@ pub(super) fn build_carousel_ui(
     area.set_vexpand(false);
     area.set_valign(gtk::Align::Center);
 
-    let width_limit_px = width_px_for_widget(&area, width_chars);
-    let viewport_width_px = if matches!(width_mode, PlayerctlWidthMode::Fixed) {
-        width_limit_px
-    } else {
-        1
-    };
+    let width_limit_px = width_px_for_widget(&area, max_width_chars);
+    let viewport_width_px = 1;
     let viewport_height_px = fixed_height_px_from_label_probe(extra_classes);
     area.set_content_width(viewport_width_px);
     area.set_content_height(viewport_height_px);
@@ -139,7 +133,6 @@ pub(super) fn build_carousel_ui(
 
     PlayerctlCarouselUi {
         root: root.clone(),
-        width_mode,
         width_limit_px,
         area,
         marquee,
@@ -711,10 +704,7 @@ fn reset_carousel_state(carousel: &PlayerctlCarouselUi, text: &str) {
     let layout = carousel.area.create_pango_layout(Some(text));
     let (text_width_px, text_height_px) = layout.pixel_size();
     let content_width_px = text_width_px.max(1);
-    let viewport_width_px = match carousel.width_mode {
-        PlayerctlWidthMode::Fixed => carousel.width_limit_px,
-        PlayerctlWidthMode::Max => content_width_px.min(carousel.width_limit_px),
-    };
+    let viewport_width_px = content_width_px.min(carousel.width_limit_px);
 
     let mut state = carousel.state.borrow_mut();
     state.full_text = text.to_string();

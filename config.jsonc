@@ -28,9 +28,7 @@
         "format": "{status_icon} {artist} - {title}",
         // Use max-width to avoid empty padding for short titles while still capping long ones.
         "max-width": 40,
-        // Optional fixed-width alternative:
-        // "fixed-width": 40,
-        // Overflow text marquee mode for width-limited playerctl (max-width/fixed-width):
+        // Overflow text marquee mode for max-width playerctl:
         // - "off" (default): static clipped text
         // - "hover": animate while hovered
         // - "open": animate while controls popover is open

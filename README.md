@@ -51,7 +51,7 @@ make ci
 - Configurable module system (`docs/modules.md`)
 - Sway modules for workspaces and active-window title (`sway/workspaces`, `sway/window`)
 - Workspace module supports container and per-workspace-button CSS class overrides
-- Playerctl supports `fixed-width` and `max-width` display modes
+- Playerctl supports `max-width` display mode for adaptive title width
 - Config file search order:
   - `~/.config/vibar/config.jsonc`
   - `./config.jsonc` (fallback)

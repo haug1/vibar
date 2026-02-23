@@ -19,7 +19,6 @@ use super::ModuleFactory;
 use backend::run_event_backend;
 use config::{
     default_playerctl_interval, PlayerctlConfig, PlayerctlMarqueeMode, PlayerctlViewConfig,
-    PlayerctlWidthMode,
 };
 use model::{render_format, should_show_metadata, status_css_class, BackendUpdate};
 use ui::{
@@ -79,23 +78,10 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
     label.set_wrap(false);
     label.set_single_line_mode(true);
 
-    let carousel = config
-        .width_chars
-        .zip(config.width_mode)
-        .map(|(width_chars, width_mode)| {
-            if matches!(width_mode, PlayerctlWidthMode::Fixed) {
-                root.add_css_class("playerctl-fixed-width");
-            } else {
-                root.add_css_class("playerctl-max-width");
-            }
-            build_carousel_ui(
-                &root,
-                width_chars,
-                width_mode,
-                config.class.as_deref(),
-                config.marquee,
-            )
-        });
+    let carousel = config.max_width.map(|max_width| {
+        root.add_css_class("playerctl-max-width");
+        build_carousel_ui(&root, max_width, config.class.as_deref(), config.marquee)
+    });
     if let Some(carousel) = &carousel {
         root.set_child(Some(&carousel.area));
     } else {
