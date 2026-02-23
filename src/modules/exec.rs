@@ -10,7 +10,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, ModuleBuildContext, ModuleConfig,
+    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
+    ModuleBuildContext, ModuleConfig,
 };
 
 use super::ModuleFactory;
@@ -21,6 +22,8 @@ pub(crate) const MODULE_TYPE: &str = "exec";
 #[derive(Debug, Deserialize, Clone)]
 pub(crate) struct ExecConfig {
     pub(crate) command: String,
+    #[serde(default = "default_exec_format")]
+    pub(crate) format: String,
     #[serde(default)]
     pub(crate) click: Option<String>,
     #[serde(rename = "on-click", default)]
@@ -33,6 +36,10 @@ pub(crate) struct ExecConfig {
 
 fn default_exec_interval() -> u32 {
     5
+}
+
+fn default_exec_format() -> String {
+    "{text}".to_string()
 }
 
 pub(crate) struct ExecFactory;
@@ -49,6 +56,7 @@ impl ModuleFactory for ExecFactory {
         let click_command = parsed.click.or(parsed.on_click);
         Ok(build_exec_module(
             parsed.command,
+            parsed.format,
             click_command,
             parsed.interval_secs,
             parsed.class,
@@ -71,6 +79,7 @@ pub(crate) fn parse_config(module: &ModuleConfig) -> Result<ExecConfig, String> 
 
 pub(crate) fn build_exec_module(
     command: String,
+    format: String,
     click_command: Option<String>,
     interval_secs: u32,
     class: Option<String>,
@@ -91,14 +100,14 @@ pub(crate) fn build_exec_module(
 
     attach_primary_click_command(&label, click_command);
 
-    let receiver = subscribe_shared_exec_output(command, effective_interval_secs);
+    let receiver = subscribe_shared_exec_output(command, format, effective_interval_secs);
 
     glib::timeout_add_local(std::time::Duration::from_millis(200), {
         let label = label.clone();
         let mut active_dynamic_classes: Vec<String> = Vec::new();
         move || {
             while let Ok(rendered) = receiver.try_recv() {
-                label.set_text(&rendered.text);
+                label.set_markup(&rendered.text);
                 for class_name in &active_dynamic_classes {
                     label.remove_css_class(class_name);
                 }
@@ -121,6 +130,7 @@ pub(crate) fn normalized_exec_interval(interval_secs: u32) -> u32 {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ExecSharedKey {
     command: String,
+    format: String,
     interval_secs: u32,
 }
 
@@ -175,10 +185,12 @@ fn shared_exec_backends() -> &'static Mutex<SharedExecMap> {
 
 fn subscribe_shared_exec_output(
     command: String,
+    format: String,
     interval_secs: u32,
 ) -> std::sync::mpsc::Receiver<ExecRenderedOutput> {
     let key = ExecSharedKey {
         command,
+        format,
         interval_secs,
     };
     let backend = {
@@ -203,49 +215,51 @@ fn subscribe_shared_exec_output(
 
 fn start_shared_exec_worker(key: ExecSharedKey, backend: Arc<SharedExecBackend>) {
     std::thread::spawn(move || loop {
-        backend.broadcast(run_exec_command(&key.command));
+        backend.broadcast(run_exec_command(&key.command, &key.format));
         std::thread::sleep(Duration::from_secs(u64::from(key.interval_secs)));
     });
 }
 
-fn run_exec_command(command: &str) -> ExecRenderedOutput {
+fn run_exec_command(command: &str, format: &str) -> ExecRenderedOutput {
     match Command::new("sh").arg("-c").arg(command).output() {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
             if !stdout.trim().is_empty() {
-                parse_exec_output(&stdout)
+                parse_exec_output(&stdout, format)
             } else if !stderr.trim().is_empty() {
-                ExecRenderedOutput {
-                    text: stderr.trim().to_string(),
-                    classes: Vec::new(),
-                }
+                apply_exec_format(
+                    stderr.trim().to_string(),
+                    Vec::new(),
+                    HashMap::new(),
+                    format,
+                )
             } else {
                 ExecRenderedOutput::default()
             }
         }
         Err(err) => ExecRenderedOutput {
-            text: format!("exec error: {err}"),
+            text: escape_markup_text(&format!("exec error: {err}")),
             classes: Vec::new(),
         },
     }
 }
 
-fn parse_exec_output(raw: &str) -> ExecRenderedOutput {
+fn parse_exec_output(raw: &str, format: &str) -> ExecRenderedOutput {
     let trimmed = raw.trim_end_matches(&['\r', '\n'][..]);
     if trimmed.is_empty() {
         return ExecRenderedOutput::default();
     }
 
     if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
-        return parse_json_exec_output(value);
+        return parse_json_exec_output(value, format);
     }
 
-    parse_i3blocks_exec_output(trimmed)
+    parse_i3blocks_exec_output(trimmed, format)
 }
 
-fn parse_json_exec_output(value: Value) -> ExecRenderedOutput {
+fn parse_json_exec_output(value: Value, format: &str) -> ExecRenderedOutput {
     let text = value
         .get("text")
         .and_then(Value::as_str)
@@ -255,8 +269,9 @@ fn parse_json_exec_output(value: Value) -> ExecRenderedOutput {
         .get("class")
         .map(parse_json_classes)
         .unwrap_or_default();
+    let vars = parse_json_format_vars(&value);
 
-    ExecRenderedOutput { text, classes }
+    apply_exec_format(text, classes, vars, format)
 }
 
 fn parse_json_classes(class_value: &Value) -> Vec<String> {
@@ -271,7 +286,7 @@ fn parse_json_classes(class_value: &Value) -> Vec<String> {
     }
 }
 
-fn parse_i3blocks_exec_output(raw: &str) -> ExecRenderedOutput {
+fn parse_i3blocks_exec_output(raw: &str, format: &str) -> ExecRenderedOutput {
     let lines: Vec<&str> = raw
         .split('\n')
         .map(|line| line.trim_end_matches('\r'))
@@ -283,13 +298,58 @@ fn parse_i3blocks_exec_output(raw: &str) -> ExecRenderedOutput {
         Vec::new()
     };
 
-    ExecRenderedOutput { text, classes }
+    apply_exec_format(text, classes, HashMap::new(), format)
 }
 
 fn split_classes(raw: &str) -> Vec<String> {
     raw.split_whitespace()
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>()
+}
+
+fn parse_json_format_vars(value: &Value) -> HashMap<String, String> {
+    let Some(map) = value.as_object() else {
+        return HashMap::new();
+    };
+
+    map.iter()
+        .filter_map(|(key, value)| {
+            value_to_placeholder_string(value).map(|value| (format!("{{{key}}}"), value))
+        })
+        .collect()
+}
+
+fn value_to_placeholder_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(v) => Some(v.clone()),
+        Value::Number(v) => Some(v.to_string()),
+        Value::Bool(v) => Some(v.to_string()),
+        _ => None,
+    }
+}
+
+fn apply_exec_format(
+    text: String,
+    classes: Vec<String>,
+    json_vars: HashMap<String, String>,
+    template: &str,
+) -> ExecRenderedOutput {
+    let mut replacements: Vec<(String, String)> = vec![
+        ("{}".to_string(), text.clone()),
+        ("{text}".to_string(), text),
+    ];
+    replacements.extend(json_vars);
+
+    let replacement_refs = replacements
+        .iter()
+        .map(|(placeholder, value)| (placeholder.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let rendered = render_markup_template(template, &replacement_refs);
+
+    ExecRenderedOutput {
+        text: rendered,
+        classes,
+    }
 }
 
 #[cfg(test)]
@@ -343,37 +403,61 @@ mod tests {
 
     #[test]
     fn run_exec_command_prefers_stdout() {
-        let output = run_exec_command("printf 'out'; printf 'err' >&2");
+        let output = run_exec_command("printf 'out'; printf 'err' >&2", "{text}");
         assert_eq!(output.text, "out");
         assert!(output.classes.is_empty());
     }
 
     #[test]
     fn run_exec_command_falls_back_to_stderr() {
-        let output = run_exec_command("printf 'err-only' >&2");
+        let output = run_exec_command("printf 'err-only' >&2", "{text}");
         assert_eq!(output.text, "err-only");
         assert!(output.classes.is_empty());
     }
 
     #[test]
     fn parse_exec_output_supports_i3blocks_style_class_line() {
-        let output = parse_exec_output("42%\n\nmedium");
+        let output = parse_exec_output("42%\n\nmedium", "{text}");
         assert_eq!(output.text, "42%");
         assert_eq!(output.classes, vec!["medium"]);
     }
 
     #[test]
     fn parse_exec_output_supports_json_class_string() {
-        let output = parse_exec_output(r#"{"text":"42%","class":"medium warning"}"#);
+        let output = parse_exec_output(r#"{"text":"42%","class":"medium warning"}"#, "{text}");
         assert_eq!(output.text, "42%");
         assert_eq!(output.classes, vec!["medium", "warning"]);
     }
 
     #[test]
     fn parse_exec_output_supports_json_class_array() {
-        let output = parse_exec_output(r#"{"text":"42%","class":["medium","battery"]}"#);
+        let output = parse_exec_output(r#"{"text":"42%","class":["medium","battery"]}"#, "{text}");
         assert_eq!(output.text, "42%");
         assert_eq!(output.classes, vec!["medium", "battery"]);
+    }
+
+    #[test]
+    fn parse_exec_output_applies_template_to_plain_text() {
+        let output = parse_exec_output("42%", "<span style=\"italic\">{}</span>");
+        assert_eq!(output.text, "<span style=\"italic\">42%</span>");
+    }
+
+    #[test]
+    fn parse_exec_output_maps_json_fields_into_template() {
+        let output = parse_exec_output(
+            r#"{"text":"42%","host":"n1","temp":66,"ok":true}"#,
+            "{host} {text} {temp} {ok}",
+        );
+        assert_eq!(output.text, "n1 42% 66 true");
+    }
+
+    #[test]
+    fn parse_exec_output_escapes_template_values() {
+        let output = parse_exec_output(
+            r#"{"text":"<b>x</b>","name":"a&b"}"#,
+            "<span>{name} {text}</span>",
+        );
+        assert_eq!(output.text, "<span>a&amp;b &lt;b&gt;x&lt;/b&gt;</span>");
     }
 
     #[test]

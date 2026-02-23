@@ -20,6 +20,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Sway integration includes `sway/workspaces`, `sway/mode`, and `sway/window` (focused window title gated per output)
 - `sway/workspaces` supports container `class` plus per-button `button-class` style overrides
 - `sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, and `pulseaudio` support Pango markup in format fields (with escaped placeholder values)
+- `exec` supports Pango-markup `format` templates with `{}` / `{text}` placeholders and top-level JSON property placeholders
 - `playerctl` supports `max-width` (caps width while shrinking to content when short)
 - `playerctl` shows a visible `…` cue when text is truncated
 - `playerctl` hover tooltip appears only when text is truncated

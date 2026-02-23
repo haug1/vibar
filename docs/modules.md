@@ -348,6 +348,7 @@ Schema:
 {
   "type": "exec",
   "command": "your shell command",
+  "format": "<span style=\"italic\">{}</span>",
   "click": "optional shell command",
   "interval_secs": 5,
   "class": "optional-css-classes"
@@ -357,6 +358,10 @@ Schema:
 Fields:
 
 - `command` (required): shell command executed with `sh -c`.
+- `format` (optional): output display template.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
+  - Default: `{text}`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
 - `interval_secs` (optional): polling interval in seconds.
@@ -371,6 +376,9 @@ Behavior:
 - Output parsing is Waybar-compatible:
   - i3blocks style (default): line 1 = text, line 2 = tooltip (ignored), line 3 = CSS class list.
   - JSON style: if output is valid JSON, `text` and `class` fields are used (`class` supports string or string array).
+- Formatting placeholders:
+  - `{}` and `{text}` map to the parsed output text.
+  - For JSON output, top-level string/number/bool properties can be referenced as `{property}`.
 - Identical `command` + `interval_secs` instances share one backend poller across bar windows.
 
 Styling:

@@ -64,6 +64,7 @@
         "click": "xdg-open $HOME",
         "class": "v-square",
       },
+      { "type": "exec", "command": "printf '{\"text\":\"net\",\"state\":\"up\"}'", "format": "{text} ({state})", "class": "v-square" },
       {
         "type": "group",
         "drawer": true,
