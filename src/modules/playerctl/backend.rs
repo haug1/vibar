@@ -11,7 +11,7 @@ use zbus::MatchRule;
 use super::model::{
     matches_player_filter, metadata_artist, metadata_i64, metadata_object_path_string,
     metadata_string, normalize_status, select_active_player, short_player_name, status_icon_for,
-    PlayerctlMetadata,
+    BackendUpdate, PlayerctlMetadata,
 };
 
 pub(super) const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
@@ -19,12 +19,6 @@ pub(super) const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const MPRIS_PLAYER_INTERFACE: &str = "org.mpris.MediaPlayer2.Player";
 const MPRIS_ROOT_INTERFACE: &str = "org.mpris.MediaPlayer2";
 const DBUS_PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
-
-#[derive(Debug, Clone)]
-pub(super) enum BackendUpdate {
-    Snapshot(Option<PlayerctlMetadata>),
-    Error(String),
-}
 
 pub(super) fn call_player_method(bus_name: &str, method: &str) -> Result<(), String> {
     let connection =

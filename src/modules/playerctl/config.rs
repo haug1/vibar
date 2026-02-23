@@ -142,3 +142,150 @@ fn default_show_when_paused() -> bool {
 fn default_show_seek() -> bool {
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{json, Map};
+
+    use crate::modules::ModuleConfig;
+
+    use super::*;
+
+    #[test]
+    fn parse_config_applies_visibility_defaults() {
+        let module = ModuleConfig::new(super::super::MODULE_TYPE, Map::new());
+        let cfg = super::super::parse_config(&module).expect("config should parse");
+
+        assert!(!cfg.hide_when_idle);
+        assert!(cfg.show_when_paused);
+    }
+
+    #[test]
+    fn parse_config_applies_controls_defaults() {
+        let module = ModuleConfig::new(super::super::MODULE_TYPE, Map::new());
+        let cfg = super::super::parse_config(&module).expect("config should parse");
+
+        assert!(!cfg.controls.enabled);
+        assert!(cfg.controls.show_seek);
+        assert!(matches!(
+            cfg.controls.open,
+            PlayerctlControlsOpenMode::LeftClick
+        ));
+    }
+
+    #[test]
+    fn parse_config_supports_controls_keys() {
+        let module = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "controls": {
+                    "enabled": true,
+                    "open": "left-click",
+                    "show_seek": false
+                }
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let cfg = super::super::parse_config(&module).expect("config should parse");
+
+        assert!(cfg.controls.enabled);
+        assert!(matches!(
+            cfg.controls.open,
+            PlayerctlControlsOpenMode::LeftClick
+        ));
+        assert!(!cfg.controls.show_seek);
+    }
+
+    #[test]
+    fn parse_config_supports_controls_aliases() {
+        let module = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "controls": {
+                    "enabled": true,
+                    "open": "left_click",
+                    "show-seek": false
+                }
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let cfg = super::super::parse_config(&module).expect("config should parse");
+
+        assert!(cfg.controls.enabled);
+        assert!(matches!(
+            cfg.controls.open,
+            PlayerctlControlsOpenMode::LeftClick
+        ));
+        assert!(!cfg.controls.show_seek);
+    }
+
+    #[test]
+    fn parse_config_supports_fixed_width_keys() {
+        let kebab = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "fixed-width": 40
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let snake = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "fixed_width": 32
+            }))
+            .expect("playerctl config map should parse"),
+        );
+
+        let kebab_cfg = super::super::parse_config(&kebab).expect("config should parse");
+        let snake_cfg = super::super::parse_config(&snake).expect("config should parse");
+
+        assert_eq!(kebab_cfg.fixed_width, Some(40));
+        assert_eq!(snake_cfg.fixed_width, Some(32));
+    }
+
+    #[test]
+    fn normalize_fixed_width_rejects_zero() {
+        assert_eq!(normalize_fixed_width(0), None);
+        assert_eq!(normalize_fixed_width(1), Some(1));
+    }
+
+    #[test]
+    fn parse_config_defaults_marquee_to_off() {
+        let module = ModuleConfig::new(super::super::MODULE_TYPE, Map::new());
+        let cfg = super::super::parse_config(&module).expect("config should parse");
+        assert!(matches!(cfg.marquee, PlayerctlMarqueeMode::Off));
+    }
+
+    #[test]
+    fn parse_config_supports_marquee_modes() {
+        let hover = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "marquee": "hover"
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let open = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "marquee": "open"
+            }))
+            .expect("playerctl config map should parse"),
+        );
+        let always = ModuleConfig::new(
+            super::super::MODULE_TYPE,
+            serde_json::from_value(json!({
+                "marquee": "always"
+            }))
+            .expect("playerctl config map should parse"),
+        );
+
+        let hover_cfg = super::super::parse_config(&hover).expect("config should parse");
+        let open_cfg = super::super::parse_config(&open).expect("config should parse");
+        let always_cfg = super::super::parse_config(&always).expect("config should parse");
+
+        assert!(matches!(hover_cfg.marquee, PlayerctlMarqueeMode::Hover));
+        assert!(matches!(open_cfg.marquee, PlayerctlMarqueeMode::Open));
+        assert!(matches!(always_cfg.marquee, PlayerctlMarqueeMode::Always));
+    }
+}
