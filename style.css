@@ -107,6 +107,16 @@
   box-shadow: none;
 }
 
+/* Sway active mode indicator */
+.sway-mode {
+  background: linear-gradient(180deg, #ffd37a 0%, #ffb657 100%);
+  border: 1px solid #ffd89b;
+  color: #211405;
+  font-weight: 700;
+  opacity: 1;
+  padding: 2px 8px;
+}
+
 /* Group drawer toggle */
 .group-toggle {
   padding: 0;

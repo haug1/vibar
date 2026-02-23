@@ -49,7 +49,7 @@ make ci
 - One bar window per connected monitor at startup
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system (`docs/modules.md`)
-- Sway modules for workspaces and active-window title (`sway/workspaces`, `sway/window`)
+- Sway modules for workspaces, active mode, and active-window title (`sway/workspaces`, `sway/mode`, `sway/window`)
 - Workspace module supports container and per-workspace-button CSS class overrides
 - Playerctl supports `max-width` display mode for adaptive title width
 - Playerctl shows a truncation cue when text is clipped

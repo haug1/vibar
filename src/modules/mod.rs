@@ -49,6 +49,7 @@ const FACTORIES: &[&dyn ModuleFactory] = &[
     &playerctl::FACTORY,
     &group::FACTORY,
     &pulseaudio::FACTORY,
+    &sway::mode::FACTORY,
     &sway::window::FACTORY,
     &sway::workspaces::FACTORY,
     &clock::FACTORY,
@@ -94,6 +95,18 @@ pub(crate) fn apply_css_classes(widget: &impl IsA<Widget>, classes: Option<&str>
     for class_name in classes.split_whitespace() {
         widget.add_css_class(class_name);
     }
+}
+
+pub(crate) fn escape_markup_text(text: &str) -> String {
+    glib::markup_escape_text(text).to_string()
+}
+
+pub(crate) fn render_markup_template(template: &str, replacements: &[(&str, &str)]) -> String {
+    let mut rendered = template.to_string();
+    for (placeholder, value) in replacements {
+        rendered = rendered.replace(placeholder, &escape_markup_text(value));
+    }
+    rendered
 }
 
 #[cfg(test)]

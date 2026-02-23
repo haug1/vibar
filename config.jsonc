@@ -21,7 +21,7 @@
         // "button-class": "workspace-item",
       },
     ],
-    "center": [{ "type": "sway/window" }],
+    "center": [{ "type": "sway/mode", "class": "v-pill" }, { "type": "sway/window" }],
     "right": [
       {
         "type": "playerctl",
