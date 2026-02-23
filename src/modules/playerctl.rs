@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{
-    Box as GtkBox, Button, GestureClick, Label, Orientation, Overlay, Popover, PositionType, Scale,
-    Widget,
+    Box as GtkBox, Button, DrawingArea, GestureClick, Label, Orientation, Overlay, Popover,
+    PositionType, Scale, Widget,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -240,9 +240,13 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
 
     let carousel = config.fixed_width.map(|fixed_width| {
         root.add_css_class("playerctl-fixed-width");
-        build_carousel_ui(&label, fixed_width)
+        build_carousel_ui(&root, fixed_width)
     });
-    root.set_child(Some(&label));
+    if let Some(carousel) = &carousel {
+        root.set_child(Some(&carousel.area));
+    } else {
+        root.set_child(Some(&label));
+    }
 
     if !config.controls_enabled {
         attach_primary_click_command(&root, config.click_command.clone());
@@ -329,16 +333,16 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
 
 #[derive(Clone)]
 struct PlayerctlCarouselUi {
-    label: Label,
-    viewport_chars: usize,
+    area: DrawingArea,
+    viewport_width_px: i32,
     state: Rc<RefCell<PlayerctlCarouselState>>,
 }
 
 #[derive(Debug)]
 struct PlayerctlCarouselState {
     full_text: String,
-    scroll_index: usize,
-    step_carry_ms: f64,
+    content_width_px: f64,
+    offset_px: f64,
     last_tick: Instant,
     hold_until: Option<Instant>,
     waiting_restart: bool,
@@ -352,23 +356,63 @@ fn normalize_fixed_width(value: u32) -> Option<u32> {
     Some(value)
 }
 
-fn build_carousel_ui(label: &Label, fixed_width: u32) -> PlayerctlCarouselUi {
-    let viewport_chars = fixed_width as usize;
-    label.set_width_chars(fixed_width as i32);
-    label.set_max_width_chars(fixed_width as i32);
-    label.set_valign(gtk::Align::Center);
+fn build_carousel_ui(root: &Overlay, fixed_width: u32) -> PlayerctlCarouselUi {
+    let area = DrawingArea::new();
+    area.add_css_class("playerctl-carousel");
+    area.set_overflow(gtk::Overflow::Hidden);
+    area.set_focusable(false);
+    area.set_can_target(false);
+    area.set_hexpand(false);
+    area.set_halign(gtk::Align::Start);
+    area.set_vexpand(false);
+    area.set_valign(gtk::Align::Center);
+
+    let viewport_width_px = fixed_width_px_for_widget(&area, fixed_width);
+    let viewport_height_px = fixed_height_px_for_widget(&area);
+    area.set_content_width(viewport_width_px);
+    area.set_content_height(viewport_height_px);
+    area.set_size_request(viewport_width_px, -1);
+
+    root.set_overflow(gtk::Overflow::Hidden);
+    root.set_size_request(viewport_width_px, -1);
+    root.set_hexpand(false);
+    root.set_halign(gtk::Align::Start);
+    root.set_valign(gtk::Align::Center);
+
+    let state = Rc::new(RefCell::new(PlayerctlCarouselState {
+        full_text: String::new(),
+        content_width_px: 0.0,
+        offset_px: 0.0,
+        last_tick: Instant::now(),
+        hold_until: None,
+        waiting_restart: false,
+    }));
+
+    area.set_draw_func({
+        let state = state.clone();
+        move |area, context, _width, height| {
+            let state = state.borrow();
+            if state.full_text.is_empty() {
+                return;
+            }
+
+            let layout = area.create_pango_layout(Some(state.full_text.as_str()));
+            let (_, text_height_px) = layout.pixel_size();
+            let y = ((height - text_height_px).max(0) as f64) / 2.0;
+
+            render_layout_at(area, context, -state.offset_px, y, &layout);
+
+            if state.content_width_px > area.allocated_width() as f64 {
+                let next_x = -state.offset_px + state.content_width_px + carousel_gap_px();
+                render_layout_at(area, context, next_x, y, &layout);
+            }
+        }
+    });
 
     PlayerctlCarouselUi {
-        label: label.clone(),
-        viewport_chars,
-        state: Rc::new(RefCell::new(PlayerctlCarouselState {
-            full_text: String::new(),
-            scroll_index: 0,
-            step_carry_ms: 0.0,
-            last_tick: Instant::now(),
-            hold_until: None,
-            waiting_restart: false,
-        })),
+        area,
+        viewport_width_px,
+        state,
     }
 }
 
@@ -388,7 +432,7 @@ fn set_playerctl_text(
 
         if should_reset {
             reset_carousel_state(carousel, text);
-            refresh_carousel_text(carousel);
+            carousel.area.queue_draw();
         }
     } else {
         label.set_text(text);
@@ -396,106 +440,118 @@ fn set_playerctl_text(
 }
 
 fn reset_carousel_state(carousel: &PlayerctlCarouselUi, text: &str) {
+    let content_width_px = measure_text_width_px(&carousel.area, text);
     let mut state = carousel.state.borrow_mut();
     state.full_text = text.to_string();
-    state.scroll_index = 0;
-    state.step_carry_ms = 0.0;
+    state.content_width_px = content_width_px;
+    state.offset_px = 0.0;
     state.last_tick = Instant::now();
     state.hold_until = Some(Instant::now() + Duration::from_millis(900));
     state.waiting_restart = false;
 }
 
 fn install_carousel_animation(carousel: PlayerctlCarouselUi) {
-    const STEP_MS: f64 = 55.0;
+    const SPEED_PX_PER_SEC: f64 = 48.0;
     const END_HOLD_MS: u64 = 700;
     const RESTART_HOLD_MS: u64 = 700;
-    const GAP_CHARS: usize = 6;
 
-    glib::timeout_add_local(Duration::from_millis(33), move || {
-        let mut state = carousel.state.borrow_mut();
+    glib::timeout_add_local(Duration::from_millis(16), move || {
         let now = Instant::now();
-        let elapsed_ms = now.saturating_duration_since(state.last_tick).as_secs_f64() * 1000.0;
-        state.last_tick = now;
-        let full_chars = state.full_text.chars().count();
-        if full_chars <= carousel.viewport_chars {
-            carousel.label.set_text(state.full_text.as_str());
-            state.scroll_index = 0;
-            state.step_carry_ms = 0.0;
-            state.hold_until = None;
-            state.waiting_restart = false;
-            return ControlFlow::Continue;
-        }
+        let mut should_redraw = false;
+        let mut should_return_early = false;
 
-        if let Some(hold_until) = state.hold_until {
-            if now < hold_until {
-                return ControlFlow::Continue;
-            }
+        {
+            let mut state = carousel.state.borrow_mut();
+            let elapsed_secs = now.saturating_duration_since(state.last_tick).as_secs_f64();
+            state.last_tick = now;
 
-            state.hold_until = None;
-            if state.waiting_restart {
-                state.scroll_index = 0;
+            if state.full_text.is_empty()
+                || state.content_width_px <= carousel.viewport_width_px as f64
+            {
+                if state.offset_px != 0.0 {
+                    state.offset_px = 0.0;
+                    should_redraw = true;
+                }
+                state.hold_until = None;
                 state.waiting_restart = false;
-                state.hold_until = Some(now + Duration::from_millis(RESTART_HOLD_MS));
-                refresh_carousel_text_with_state(&carousel, &state, GAP_CHARS);
-                return ControlFlow::Continue;
+                should_return_early = true;
+            }
+
+            if !should_return_early {
+                if let Some(hold_until) = state.hold_until {
+                    if now < hold_until {
+                        should_return_early = true;
+                    } else {
+                        state.hold_until = None;
+                        if state.waiting_restart {
+                            state.offset_px = 0.0;
+                            state.waiting_restart = false;
+                            state.hold_until = Some(now + Duration::from_millis(RESTART_HOLD_MS));
+                            should_redraw = true;
+                            should_return_early = true;
+                        }
+                    }
+                }
+            }
+
+            if !should_return_early {
+                state.offset_px += SPEED_PX_PER_SEC * elapsed_secs;
+                let loop_distance = state.content_width_px + carousel_gap_px();
+                if state.offset_px >= loop_distance {
+                    state.offset_px = loop_distance;
+                    state.waiting_restart = true;
+                    state.hold_until = Some(now + Duration::from_millis(END_HOLD_MS));
+                }
+                should_redraw = true;
             }
         }
 
-        state.step_carry_ms += elapsed_ms;
-        if state.step_carry_ms < STEP_MS {
-            return ControlFlow::Continue;
+        if should_redraw {
+            carousel.area.queue_draw();
         }
-        state.step_carry_ms -= STEP_MS;
 
-        let max_index = full_chars + GAP_CHARS - carousel.viewport_chars;
-        if state.scroll_index < max_index {
-            state.scroll_index += 1;
-            refresh_carousel_text_with_state(&carousel, &state, GAP_CHARS);
-        } else {
-            state.waiting_restart = true;
-            state.hold_until = Some(now + Duration::from_millis(END_HOLD_MS));
+        if should_return_early {
+            return ControlFlow::Continue;
         }
 
         ControlFlow::Continue
     });
 }
 
-fn refresh_carousel_text(carousel: &PlayerctlCarouselUi) {
-    let state = carousel.state.borrow();
-    refresh_carousel_text_with_state(carousel, &state, 6);
+fn fixed_width_px_for_widget(widget: &impl IsA<Widget>, fixed_width_chars: u32) -> i32 {
+    let sample = "M".repeat(fixed_width_chars as usize);
+    let layout = widget.create_pango_layout(Some(sample.as_str()));
+    let (pixel_width, _) = layout.pixel_size();
+    pixel_width.max(1)
 }
 
-fn refresh_carousel_text_with_state(
-    carousel: &PlayerctlCarouselUi,
-    state: &PlayerctlCarouselState,
-    gap_chars: usize,
+fn fixed_height_px_for_widget(widget: &impl IsA<Widget>) -> i32 {
+    let layout = widget.create_pango_layout(Some("Mg"));
+    let (_, pixel_height) = layout.pixel_size();
+    // DrawingArea glyph bounds are tighter than GtkLabel's rendered line box.
+    // Add a small pad so fixed-width playerctl matches adjacent label modules.
+    (pixel_height + 4).max(1)
+}
+
+fn measure_text_width_px(widget: &impl IsA<Widget>, text: &str) -> f64 {
+    let layout = widget.create_pango_layout(Some(text));
+    let (pixel_width, _) = layout.pixel_size();
+    pixel_width.max(1) as f64
+}
+
+fn carousel_gap_px() -> f64 {
+    42.0
+}
+
+#[allow(deprecated)]
+fn render_layout_at(
+    area: &DrawingArea,
+    context: &gtk::cairo::Context,
+    x: f64,
+    y: f64,
+    layout: &gtk::pango::Layout,
 ) {
-    let text = render_carousel_window(
-        &state.full_text,
-        state.scroll_index,
-        carousel.viewport_chars,
-        gap_chars,
-    );
-    carousel.label.set_text(text.as_str());
-}
-
-fn render_carousel_window(text: &str, start: usize, width: usize, gap_chars: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= width {
-        return text.to_string();
-    }
-
-    let mut stream = chars.clone();
-    stream.extend(std::iter::repeat_n(' ', gap_chars));
-    let stream_len = stream.len();
-
-    (0..width)
-        .map(|offset| stream[(start + offset) % stream_len])
-        .collect()
+    gtk::render_layout(&area.style_context(), context, x, y, layout);
 }
 
 fn build_controls_ui(root: &Overlay, show_seek: bool) -> PlayerctlControlsUi {
