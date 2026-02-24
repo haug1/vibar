@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use glib::ControlFlow;
@@ -152,22 +153,28 @@ fn build_backlight_module(
     }
 
     let (sender, receiver) = std::sync::mpsc::channel::<BacklightUiUpdate>();
-    std::thread::spawn(move || loop {
-        let update = match read_backlight_snapshot(preferred_device.as_deref()) {
-            Ok(snapshot) => BacklightUiUpdate {
-                text: render_format(&format, &snapshot, &format_icons),
-                visible: snapshot.device.powered,
-                level_class: brightness_css_class(snapshot.percent),
-            },
-            Err(err) => BacklightUiUpdate {
-                text: escape_markup_text(&format!("backlight error: {err}")),
-                visible: true,
-                level_class: "brightness-unknown",
-            },
-        };
+    std::thread::spawn(move || {
+        let _ = sender.send(build_backlight_ui_update(
+            &format,
+            preferred_device.as_deref(),
+            &format_icons,
+        ));
 
-        let _ = sender.send(update);
-        std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
+        spawn_udev_listener(
+            sender.clone(),
+            format.clone(),
+            preferred_device.clone(),
+            format_icons.clone(),
+        );
+
+        loop {
+            std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
+            let _ = sender.send(build_backlight_ui_update(
+                &format,
+                preferred_device.as_deref(),
+                &format_icons,
+            ));
+        }
     });
 
     glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
@@ -186,6 +193,64 @@ fn build_backlight_module(
     });
 
     label
+}
+
+fn spawn_udev_listener(
+    sender: Sender<BacklightUiUpdate>,
+    format: String,
+    preferred_device: Option<String>,
+    format_icons: Vec<String>,
+) {
+    std::thread::spawn(move || {
+        let builder = match udev::MonitorBuilder::new() {
+            Ok(builder) => builder,
+            Err(err) => {
+                eprintln!("backlight udev listener unavailable, using polling only: {err}");
+                return;
+            }
+        };
+        let builder = match builder.match_subsystem("backlight") {
+            Ok(builder) => builder,
+            Err(err) => {
+                eprintln!("backlight udev subsystem filter failed, using polling only: {err}");
+                return;
+            }
+        };
+        let monitor = match builder.listen() {
+            Ok(monitor) => monitor,
+            Err(err) => {
+                eprintln!("backlight udev listen failed, using polling only: {err}");
+                return;
+            }
+        };
+
+        for _event in monitor.iter() {
+            let _ = sender.send(build_backlight_ui_update(
+                &format,
+                preferred_device.as_deref(),
+                &format_icons,
+            ));
+        }
+    });
+}
+
+fn build_backlight_ui_update(
+    format: &str,
+    preferred_device: Option<&str>,
+    format_icons: &[String],
+) -> BacklightUiUpdate {
+    match read_backlight_snapshot(preferred_device) {
+        Ok(snapshot) => BacklightUiUpdate {
+            text: render_format(format, &snapshot, format_icons),
+            visible: snapshot.device.powered,
+            level_class: brightness_css_class(snapshot.percent),
+        },
+        Err(err) => BacklightUiUpdate {
+            text: escape_markup_text(&format!("backlight error: {err}")),
+            visible: true,
+            level_class: "brightness-unknown",
+        },
+    }
 }
 
 fn read_backlight_snapshot(preferred_device: Option<&str>) -> Result<BacklightSnapshot, String> {

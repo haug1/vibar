@@ -581,7 +581,8 @@ Format placeholders:
 
 Behavior:
 
-- Polls Linux backlight data from `/sys/class/backlight/*`.
+- Reads Linux backlight data from `/sys/class/backlight/*`.
+- Uses `udev` backlight events for near-immediate updates, with periodic polling resync (`interval_secs`) as fallback/safety.
 - Uses `actual_brightness` when present, otherwise `brightness`.
 - Hides the module when the chosen device reports `bl_power != 0`.
 - Adds brightness-state CSS class on each update:

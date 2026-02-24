@@ -21,7 +21,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `sway/window` supports Pango-markup `format` templates via `{}` / `{title}` placeholders
 - `sway/workspaces` supports container `class` plus per-button `button-class` style overrides
 - `sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, and `pulseaudio` support Pango markup in format fields (with escaped placeholder values)
-- `backlight` module polls `/sys/class/backlight`, supports `format-icons` + optional explicit `device`, and hides when panel power is reported off
+- `backlight` module reads `/sys/class/backlight`, supports `format-icons` + optional explicit `device`, hides when panel power is reported off, and updates via udev callbacks with interval-based fallback/resync
 - `backlight` also supports Pango-markup `format` templates with `{percent}`, `{icon}`, `{brightness}`, `{max}`, and `{device}` placeholders
 - `exec` supports Pango-markup `format` templates with `{}` / `{text}` placeholders and top-level JSON property placeholders
 - `playerctl` supports `max-width` (caps width while shrinking to content when short)
