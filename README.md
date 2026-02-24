@@ -78,3 +78,7 @@ make ci
 ## Acknowledgements
 
 - [Waybar](https://github.com/Alexays/Waybar) for long-running status bar design ideas and overall behavior references that influenced this project.
+
+## License
+
+MIT. See [`LICENSE`](./LICENSE).
