@@ -1,5 +1,7 @@
 # vibar
 
+<img width="2560" height="45" alt="image" src="https://github.com/user-attachments/assets/1e79efb0-39db-4db8-9c77-c47ff62d789f" />
+
 A minimal Wayland taskbar using Rust + GTK4 + `gtk4-layer-shell`.
 
 Quick orientation for future sessions: `SESSION_NOTES.md`.
