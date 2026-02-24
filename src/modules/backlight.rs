@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::Sender;
@@ -450,14 +451,58 @@ fn spawn_udev_listener(
             }
         };
 
-        for _event in monitor.iter() {
-            let _ = sender.send(build_backlight_ui_update(
-                &format,
-                preferred_device.as_deref(),
-                &format_icons,
-            ));
+        let monitor_fd = monitor.as_raw_fd();
+        loop {
+            match wait_for_readable_fd(monitor_fd) {
+                Ok(()) => {
+                    let mut had_event = false;
+                    for _event in monitor.iter() {
+                        had_event = true;
+                        let _ = sender.send(build_backlight_ui_update(
+                            &format,
+                            preferred_device.as_deref(),
+                            &format_icons,
+                        ));
+                    }
+                    if !had_event {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                }
+                Err(err) => {
+                    eprintln!("backlight udev wait failed, listener stopped: {err}");
+                    return;
+                }
+            }
         }
     });
+}
+
+fn wait_for_readable_fd(fd: i32) -> Result<(), String> {
+    let mut pollfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+
+    loop {
+        // SAFETY: we pass a valid pointer to one pollfd entry and a correct count.
+        let rc = unsafe { libc::poll(&mut pollfd, 1, -1) };
+        if rc > 0 {
+            if (pollfd.revents & libc::POLLIN) != 0 {
+                return Ok(());
+            }
+            return Err(format!("unexpected poll events: {}", pollfd.revents));
+        }
+        if rc == 0 {
+            continue;
+        }
+
+        let err = std::io::Error::last_os_error();
+        if err.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(format!("poll failed: {err}"));
+    }
 }
 
 fn build_backlight_ui_update(

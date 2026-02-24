@@ -1604,6 +1604,7 @@ dependencies = [
  "gtk4",
  "gtk4-layer-shell",
  "json5",
+ "libc",
  "libpulse-binding",
  "serde",
  "serde_json",
