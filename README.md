@@ -63,6 +63,7 @@ make ci
 - Playerctl supports `max-width` display mode for adaptive title width
 - Playerctl shows a truncation cue when text is clipped
 - Playerctl hover tooltip appears only when text is clipped
+- Backlight module with Waybar-style `format-icons`, optional `device` selection, and `/sys/class/backlight` polling
 - Config file search order:
   - `~/.config/vibar/config.jsonc`
   - `./config.jsonc` (fallback)

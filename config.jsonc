@@ -57,6 +57,13 @@
         "class": "v-square",
         "format": "{used_percentage}% \uf2db",
       },
+      {
+        "type": "backlight",
+        "class": "v-square",
+        "format": "{percent}% {icon}",
+        // Optional explicit device; if omitted, picks the device with largest max_brightness.
+        // "device": "intel_backlight",
+      },
       { "type": "pulseaudio", "click": "pavucontrol", "class": "v-square" },
       {
         "type": "disk",

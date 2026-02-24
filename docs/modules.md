@@ -537,6 +537,65 @@ Styling:
 - Dynamic usage classes: `.usage-low`, `.usage-medium`, `.usage-high`, `.usage-critical`, `.usage-unknown`
 - Optional extra class via `class` field.
 
+## `backlight`
+
+Schema:
+
+```json
+{
+  "type": "backlight",
+  "format": "{percent}% {icon}",
+  "interval_secs": 2,
+  "device": "intel_backlight",
+  "format-icons": ["", "", "", "", "", "", "", "", ""],
+  "click": "optional shell command",
+  "class": "optional-css-classes"
+}
+```
+
+Fields:
+
+- `format` (optional): output format template.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
+  - Default: `{percent}% {icon}`
+- `interval_secs` / `interval` (optional): polling interval in seconds.
+  - Default: `2`
+  - Minimum: `1` (values below are clamped)
+- `device` (optional): preferred backlight device in `/sys/class/backlight` (for example `intel_backlight`).
+  - If omitted (or not found), module falls back to the device with the largest `max_brightness`.
+- `format-icons` (optional): icon list mapped by brightness percentage.
+  - Empty list renders `{icon}` as empty text.
+  - Default: `["", "", "", "", "", "", "", "", ""]`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click` (Waybar-style key).
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+
+Format placeholders:
+
+- `{percent}`
+- `{icon}`
+- `{brightness}`
+- `{max}`
+- `{device}`
+
+Behavior:
+
+- Polls Linux backlight data from `/sys/class/backlight/*`.
+- Uses `actual_brightness` when present, otherwise `brightness`.
+- Hides the module when the chosen device reports `bl_power != 0`.
+- Adds brightness-state CSS class on each update:
+  - `brightness-low` for `< 34%`
+  - `brightness-medium` for `34-66%`
+  - `brightness-high` for `>= 67%`
+  - `brightness-unknown` when polling fails
+
+Styling:
+
+- Label classes: `.module.backlight`
+- Dynamic brightness classes: `.brightness-low`, `.brightness-medium`, `.brightness-high`, `.brightness-unknown`
+- Optional extra class via `class` field.
+
 ## `tray`
 
 Schema:

@@ -4,7 +4,7 @@ This document contains implementation-facing details that are intentionally kept
 
 ## Architecture
 
-- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `playerctl`, `sway/workspaces`, `sway/mode`, `sway/window`, `pulseaudio`).
+- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `backlight`, `playerctl`, `sway/workspaces`, `sway/mode`, `sway/window`, `pulseaudio`).
 - `src/modules/mod.rs` stores raw module config entries:
   - `type: String`
   - module-specific fields as a dynamic map (`serde_json::Map<String, Value>`)
@@ -23,10 +23,11 @@ This document contains implementation-facing details that are intentionally kept
   - Tooltip behavior: hover tooltip appears only while the visible playerctl text is truncated.
   - Implementation layout: `src/modules/playerctl/mod.rs` orchestration + `src/modules/playerctl/config.rs` (schema/defaults), `src/modules/playerctl/backend.rs` (MPRIS DBus backend), `src/modules/playerctl/model.rs` (pure metadata/format helpers), `src/modules/playerctl/ui.rs` (GTK tooltip/carousel/controls UI wiring).
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`.
+- Backlight module polls `/sys/class/backlight` and supports explicit `device` selection or largest-`max_brightness` fallback.
 - `sway/workspaces` supports module-level `class` and per-button `button-class`/`button_class` style hooks.
 - `sway/mode` tracks active sway binding mode (`get_binding_state`) and hides itself when mode is `default`.
 - `sway/window` supports markup-aware `format` with `{}`/`{title}` placeholders for focused title rendering.
-- Markup-capable format modules (`sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, `pulseaudio`) render via Pango markup and escape replacement values before insertion.
+- Markup-capable format modules (`sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, `backlight`, `pulseaudio`) render via Pango markup and escape replacement values before insertion.
 - Config loading prefers `~/.config/vibar/config.jsonc`, then falls back to `./config.jsonc`.
 - Top-level style config supports layered CSS (`style.load-default` + `style.path`).
 - Embedded default stylesheet includes small utility classes (`v-pill`, `v-square`) for quick module appearance tuning from config.
