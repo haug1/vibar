@@ -45,6 +45,13 @@ Run CI-equivalent checks:
 make ci
 ```
 
+## Documentation
+
+- Module configuration and styling selectors: [`docs/modules.md`](./docs/modules.md)
+- Developer architecture and extension notes: [`docs/developer.md`](./docs/developer.md)
+- Default example config: [`config.jsonc`](./config.jsonc)
+- Base stylesheet loaded by default: [`style.css`](./style.css)
+
 ## Features
 
 - Bottom-anchored layer-shell bar
@@ -67,15 +74,6 @@ make ci
 ## Troubleshooting
 
 - If text updates leave tiny font/glyph dots, it may help to set an explicit `line-height` on the affected module class (for example `line-height: 1.5;`).
-
-## Documentation
-
-- User-facing setup and commands: `README.md`
-- Session continuity notes: `SESSION_NOTES.md`
-- Module configuration and styling selectors: [`docs/modules.md`](./docs/modules.md)
-- Developer architecture and extension notes: [`docs/developer.md`](./docs/developer.md)
-- Default example config: [`config.jsonc`](./config.jsonc)
-- Base stylesheet loaded by default: [`style.css`](./style.css)
 
 ## Acknowledgements
 
