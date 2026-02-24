@@ -23,6 +23,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, and `pulseaudio` support Pango markup in format fields (with escaped placeholder values)
 - `backlight` module reads `/sys/class/backlight`, supports `format-icons` + optional explicit `device`, hides when panel power is reported off, and updates via udev callbacks with interval-based fallback/resync
 - `backlight` also supports Pango-markup `format` templates with `{percent}`, `{icon}`, `{brightness}`, `{max}`, and `{device}` placeholders
+- `backlight` supports scroll brightness control (`scroll-step`, `min-brightness`) via logind DBus by default, with optional `on-scroll-up` / `on-scroll-down` command overrides
 - `exec` supports Pango-markup `format` templates with `{}` / `{text}` placeholders and top-level JSON property placeholders
 - `playerctl` supports `max-width` (caps width while shrinking to content when short)
 - `playerctl` shows a visible `…` cue when text is truncated

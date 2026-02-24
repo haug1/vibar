@@ -61,8 +61,13 @@
         "type": "backlight",
         "class": "v-square",
         "format": "{percent}% {icon}",
+        "scroll-step": 1.0,
+        "min-brightness": 1.0,
         // Optional explicit device; if omitted, picks the device with largest max_brightness.
         // "device": "intel_backlight",
+        // Optional custom scroll commands; if set, these replace default brightness control:
+        // "on-scroll-up": "brightnessctl set +1%",
+        // "on-scroll-down": "brightnessctl set 1%-",
       },
       { "type": "pulseaudio", "click": "pavucontrol", "class": "v-square" },
       {

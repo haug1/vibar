@@ -1,13 +1,15 @@
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{Label, Widget};
+use gtk::{EventControllerScroll, EventControllerScrollFlags, Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
+use zbus::blocking::{Connection, Proxy};
 
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
@@ -18,6 +20,8 @@ use super::ModuleFactory;
 
 const MIN_BACKLIGHT_INTERVAL_SECS: u32 = 1;
 const DEFAULT_BACKLIGHT_INTERVAL_SECS: u32 = 2;
+const DEFAULT_SCROLL_STEP: f64 = 1.0;
+const DEFAULT_MIN_BRIGHTNESS: f64 = 0.0;
 const DEFAULT_BACKLIGHT_FORMAT: &str = "{percent}% {icon}";
 const UI_DRAIN_INTERVAL_MILLIS: u64 = 200;
 const BACKLIGHT_LEVEL_CLASSES: [&str; 4] = [
@@ -42,6 +46,14 @@ pub(crate) struct BacklightConfig {
     pub(crate) click: Option<String>,
     #[serde(rename = "on-click", default)]
     pub(crate) on_click: Option<String>,
+    #[serde(rename = "on-scroll-up", default)]
+    pub(crate) on_scroll_up: Option<String>,
+    #[serde(rename = "on-scroll-down", default)]
+    pub(crate) on_scroll_down: Option<String>,
+    #[serde(rename = "scroll-step", default = "default_scroll_step")]
+    pub(crate) scroll_step: f64,
+    #[serde(rename = "min-brightness", default = "default_min_brightness")]
+    pub(crate) min_brightness: f64,
     #[serde(default)]
     pub(crate) class: Option<String>,
 }
@@ -67,6 +79,15 @@ struct BacklightUiUpdate {
     level_class: &'static str,
 }
 
+#[derive(Debug, Clone)]
+enum BacklightControlMessage {
+    AdjustByPercent {
+        increase: bool,
+        step_percent: f64,
+        min_percent: f64,
+    },
+}
+
 pub(crate) struct BacklightFactory;
 
 pub(crate) const FACTORY: BacklightFactory = BacklightFactory;
@@ -78,25 +99,20 @@ impl ModuleFactory for BacklightFactory {
 
     fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
-        let format = parsed
-            .format
-            .unwrap_or_else(|| DEFAULT_BACKLIGHT_FORMAT.to_string());
-        let click_command = parsed.click.or(parsed.on_click);
-
-        Ok(build_backlight_module(
-            format,
-            parsed.interval_secs,
-            parsed.device,
-            parsed.format_icons,
-            click_command,
-            parsed.class,
-        )
-        .upcast())
+        Ok(build_backlight_module(parsed).upcast())
     }
 }
 
 fn default_backlight_interval() -> u32 {
     DEFAULT_BACKLIGHT_INTERVAL_SECS
+}
+
+fn default_scroll_step() -> f64 {
+    DEFAULT_SCROLL_STEP
+}
+
+fn default_min_brightness() -> f64 {
+    DEFAULT_MIN_BRIGHTNESS
 }
 
 fn default_backlight_icons() -> Vec<String> {
@@ -129,14 +145,23 @@ pub(crate) fn normalized_backlight_interval(interval_secs: u32) -> u32 {
     interval_secs.max(MIN_BACKLIGHT_INTERVAL_SECS)
 }
 
-fn build_backlight_module(
-    format: String,
-    interval_secs: u32,
-    preferred_device: Option<String>,
-    format_icons: Vec<String>,
-    click_command: Option<String>,
-    class: Option<String>,
-) -> Label {
+fn build_backlight_module(config: BacklightConfig) -> Label {
+    let BacklightConfig {
+        format,
+        interval_secs,
+        device: preferred_device,
+        format_icons,
+        click,
+        on_click,
+        on_scroll_up,
+        on_scroll_down,
+        scroll_step,
+        min_brightness,
+        class,
+    } = config;
+    let format = format.unwrap_or_else(|| DEFAULT_BACKLIGHT_FORMAT.to_string());
+    let click_command = click.or(on_click);
+
     let label = Label::new(None);
     label.add_css_class("module");
     label.add_css_class("backlight");
@@ -150,6 +175,110 @@ fn build_backlight_module(
             "backlight interval_secs={} is too low; clamping to {} second",
             interval_secs, effective_interval_secs
         );
+    }
+
+    let scroll_step = normalized_scroll_step(scroll_step);
+    if scroll_step > 0.0 || on_scroll_up.is_some() || on_scroll_down.is_some() {
+        let scroll = EventControllerScroll::new(
+            EventControllerScrollFlags::VERTICAL | EventControllerScrollFlags::DISCRETE,
+        );
+
+        if on_scroll_up.is_some() || on_scroll_down.is_some() {
+            let up_command = on_scroll_up.clone();
+            let down_command = on_scroll_down.clone();
+            scroll.connect_scroll(move |_, _, dy| {
+                if dy < 0.0 {
+                    if let Some(command) = up_command.as_ref() {
+                        spawn_shell_command(command);
+                    }
+                    return glib::Propagation::Stop;
+                }
+                if dy > 0.0 {
+                    if let Some(command) = down_command.as_ref() {
+                        spawn_shell_command(command);
+                    }
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            });
+        } else if scroll_step > 0.0 {
+            let (control_tx, control_rx) = std::sync::mpsc::channel::<BacklightControlMessage>();
+            let clamped_min_brightness = min_brightness.clamp(0.0, 100.0);
+
+            scroll.connect_scroll(move |_, _, dy| {
+                if dy < 0.0 {
+                    let _ = control_tx.send(BacklightControlMessage::AdjustByPercent {
+                        increase: true,
+                        step_percent: scroll_step,
+                        min_percent: clamped_min_brightness,
+                    });
+                    return glib::Propagation::Stop;
+                }
+                if dy > 0.0 {
+                    let _ = control_tx.send(BacklightControlMessage::AdjustByPercent {
+                        increase: false,
+                        step_percent: scroll_step,
+                        min_percent: clamped_min_brightness,
+                    });
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            });
+
+            let (sender, receiver) = std::sync::mpsc::channel::<BacklightUiUpdate>();
+            std::thread::spawn(move || {
+                let _ = sender.send(build_backlight_ui_update(
+                    &format,
+                    preferred_device.as_deref(),
+                    &format_icons,
+                ));
+
+                spawn_udev_listener(
+                    sender.clone(),
+                    format.clone(),
+                    preferred_device.clone(),
+                    format_icons.clone(),
+                );
+
+                loop {
+                    while let Ok(message) = control_rx.try_recv() {
+                        let _ =
+                            apply_backlight_control_message(preferred_device.as_deref(), message);
+                        let _ = sender.send(build_backlight_ui_update(
+                            &format,
+                            preferred_device.as_deref(),
+                            &format_icons,
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
+                    let _ = sender.send(build_backlight_ui_update(
+                        &format,
+                        preferred_device.as_deref(),
+                        &format_icons,
+                    ));
+                }
+            });
+
+            glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
+                let label = label.clone();
+                move || {
+                    while let Ok(update) = receiver.try_recv() {
+                        label.set_markup(&update.text);
+                        label.set_visible(update.visible);
+                        for class_name in BACKLIGHT_LEVEL_CLASSES {
+                            label.remove_css_class(class_name);
+                        }
+                        label.add_css_class(update.level_class);
+                    }
+                    ControlFlow::Continue
+                }
+            });
+
+            label.add_controller(scroll);
+            return label;
+        }
+
+        label.add_controller(scroll);
     }
 
     let (sender, receiver) = std::sync::mpsc::channel::<BacklightUiUpdate>();
@@ -193,6 +322,103 @@ fn build_backlight_module(
     });
 
     label
+}
+
+fn spawn_shell_command(command: &str) {
+    let command = command.to_string();
+    std::thread::spawn(move || {
+        let _ = Command::new("sh").arg("-c").arg(command).spawn();
+    });
+}
+
+fn normalized_scroll_step(step: f64) -> f64 {
+    if step <= 0.0 || !step.is_finite() {
+        0.0
+    } else {
+        step
+    }
+}
+
+fn apply_backlight_control_message(
+    preferred_device: Option<&str>,
+    message: BacklightControlMessage,
+) -> Result<(), String> {
+    match message {
+        BacklightControlMessage::AdjustByPercent {
+            increase,
+            step_percent,
+            min_percent,
+        } => set_backlight_by_percent_delta(preferred_device, increase, step_percent, min_percent),
+    }
+}
+
+fn set_backlight_by_percent_delta(
+    preferred_device: Option<&str>,
+    increase: bool,
+    step_percent: f64,
+    min_percent: f64,
+) -> Result<(), String> {
+    let devices = read_backlight_devices()?;
+    let Some(device) = select_best_device(&devices, preferred_device) else {
+        return Err("no backlight devices found".to_string());
+    };
+
+    let max = device.max_brightness;
+    if max == 0 {
+        return Err("backlight max_brightness is 0".to_string());
+    }
+
+    let step_abs = ((step_percent.clamp(0.0, 100.0) / 100.0) * max as f64).round() as u64;
+    if step_abs == 0 {
+        return Ok(());
+    }
+
+    let min_abs = ((min_percent.clamp(0.0, 100.0) / 100.0) * max as f64).round() as u64;
+    let current = device.actual_brightness;
+    let mut target = if increase {
+        current.saturating_add(step_abs).min(max)
+    } else {
+        current.saturating_sub(step_abs)
+    };
+    if !increase && current <= min_abs {
+        return Ok(());
+    }
+    if !increase {
+        target = target.max(min_abs);
+    }
+
+    if target == current {
+        return Ok(());
+    }
+
+    set_brightness_via_logind(&device.name, target as u32)
+}
+
+fn set_brightness_via_logind(device_name: &str, brightness: u32) -> Result<(), String> {
+    let connection =
+        Connection::system().map_err(|err| format!("failed to connect to system dbus: {err}"))?;
+
+    for session_path in [
+        "/org/freedesktop/login1/session/auto",
+        "/org/freedesktop/login1/session/self",
+    ] {
+        let proxy = Proxy::new(
+            &connection,
+            "org.freedesktop.login1",
+            session_path,
+            "org.freedesktop.login1.Session",
+        )
+        .map_err(|err| format!("failed to create login1 proxy: {err}"))?;
+
+        if proxy
+            .call_method("SetBrightness", &("backlight", device_name, brightness))
+            .is_ok()
+        {
+            return Ok(());
+        }
+    }
+
+    Err("failed to set brightness via login1 SetBrightness".to_string())
 }
 
 fn spawn_udev_listener(
@@ -399,6 +625,14 @@ mod tests {
         assert_eq!(normalized_backlight_interval(0), 1);
         assert_eq!(normalized_backlight_interval(1), 1);
         assert_eq!(normalized_backlight_interval(10), 10);
+    }
+
+    #[test]
+    fn normalized_scroll_step_disables_invalid_values() {
+        assert_eq!(normalized_scroll_step(-1.0), 0.0);
+        assert_eq!(normalized_scroll_step(0.0), 0.0);
+        assert_eq!(normalized_scroll_step(f64::NAN), 0.0);
+        assert_eq!(normalized_scroll_step(2.0), 2.0);
     }
 
     #[test]

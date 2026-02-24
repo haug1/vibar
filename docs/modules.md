@@ -548,6 +548,10 @@ Schema:
   "interval_secs": 2,
   "device": "intel_backlight",
   "format-icons": ["", "", "", "", "", "", "", "", ""],
+  "scroll-step": 1.0,
+  "min-brightness": 0.0,
+  "on-scroll-up": "optional shell command",
+  "on-scroll-down": "optional shell command",
   "click": "optional shell command",
   "class": "optional-css-classes"
 }
@@ -567,6 +571,15 @@ Fields:
 - `format-icons` (optional): icon list mapped by brightness percentage.
   - Empty list renders `{icon}` as empty text.
   - Default: `["", "", "", "", "", "", "", "", ""]`
+- `scroll-step` (optional): amount in percent changed per scroll event when using default scroll behavior.
+  - Default: `1.0`
+  - Values `<= 0` disable default scroll brightness control.
+- `min-brightness` (optional): lower clamp percentage for default scroll-down behavior.
+  - Default: `0.0`
+  - Range is clamped to `0..100`.
+- `on-scroll-up` (optional): shell command for scroll-up.
+- `on-scroll-down` (optional): shell command for scroll-down.
+  - If either scroll command is set, custom commands are used for scrolling instead of default brightness control.
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click` (Waybar-style key).
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
@@ -584,6 +597,7 @@ Behavior:
 - Reads Linux backlight data from `/sys/class/backlight/*`.
 - Uses `udev` backlight events for near-immediate updates, with periodic polling resync (`interval_secs`) as fallback/safety.
 - Uses `actual_brightness` when present, otherwise `brightness`.
+- By default, scroll up/down adjusts brightness via logind DBus `SetBrightness`.
 - Hides the module when the chosen device reports `bl_power != 0`.
 - Adds brightness-state CSS class on each update:
   - `brightness-low` for `< 34%`
