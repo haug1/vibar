@@ -1,8 +1,8 @@
 use std::fs;
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
@@ -19,6 +19,7 @@ const POWER_SUPPLY_PATH: &str = "/sys/class/power_supply";
 const MIN_BATTERY_INTERVAL_SECS: u32 = 1;
 const DEFAULT_BATTERY_INTERVAL_SECS: u32 = 10;
 const DEFAULT_BATTERY_FORMAT: &str = "{capacity}% {icon}";
+const BACKEND_WAKE_POLL_MILLIS: u64 = 50;
 const BATTERY_LEVEL_CLASSES: [&str; 5] = [
     "battery-critical",
     "battery-low",
@@ -66,6 +67,16 @@ struct BatteryUiUpdate {
     visible: bool,
     level_class: &'static str,
     status_class: &'static str,
+}
+
+struct BatteryBackend {
+    preferred_device: Option<String>,
+    snapshot: Option<BatterySnapshot>,
+    last_error: Option<String>,
+}
+
+struct UdevMonitor {
+    monitor: udev::MonitorSocket,
 }
 
 pub(crate) struct BatteryFactory;
@@ -149,60 +160,234 @@ pub(crate) fn build_battery_module(
         );
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<BatteryUiUpdate>();
-    let poll_format = format.clone();
-    std::thread::spawn(move || loop {
-        let update = match read_battery_snapshot(
+    let main_context = glib::MainContext::default();
+    let label_weak = glib::SendWeakRef::from(label.downgrade());
+    std::thread::spawn(move || {
+        run_battery_backend_loop(
+            main_context,
+            label_weak,
+            format,
+            preferred_device,
+            format_icons,
+            effective_interval_secs,
+        );
+    });
+
+    label
+}
+
+fn apply_battery_ui_update(label: &Label, update: &BatteryUiUpdate) {
+    label.set_visible(update.visible);
+    if update.visible {
+        label.set_markup(&update.text);
+    }
+
+    for class_name in BATTERY_LEVEL_CLASSES {
+        label.remove_css_class(class_name);
+    }
+    for class_name in BATTERY_STATUS_CLASSES {
+        label.remove_css_class(class_name);
+    }
+    label.add_css_class(update.level_class);
+    label.add_css_class(update.status_class);
+}
+
+fn run_battery_backend_loop(
+    main_context: glib::MainContext,
+    label_weak: glib::SendWeakRef<Label>,
+    format: String,
+    preferred_device: Option<String>,
+    format_icons: Vec<String>,
+    interval_secs: u32,
+) {
+    let resync_interval = Duration::from_secs(u64::from(interval_secs));
+    let mut last_resync = Instant::now();
+    let mut backend = BatteryBackend::new(preferred_device);
+    let mut udev_monitor = match UdevMonitor::new() {
+        Ok(monitor) => Some(monitor),
+        Err(err) => {
+            eprintln!("battery udev listener unavailable, using polling only: {err}");
+            None
+        }
+    };
+
+    backend.refresh_from_sysfs();
+    dispatch_battery_ui_update(
+        &main_context,
+        &label_weak,
+        backend.build_ui_update(&format, &format_icons),
+    );
+
+    loop {
+        let wake_timeout =
+            millis_until_next_resync(last_resync, resync_interval).min(BACKEND_WAKE_POLL_MILLIS);
+
+        if let Some(monitor) = udev_monitor.as_mut() {
+            match wait_for_readable_fd(monitor.fd(), wake_timeout) {
+                Ok(true) => {
+                    if monitor.drain_events() {
+                        backend.refresh_from_sysfs();
+                        dispatch_battery_ui_update(
+                            &main_context,
+                            &label_weak,
+                            backend.build_ui_update(&format, &format_icons),
+                        );
+                    }
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    eprintln!("battery udev wait failed, listener stopped: {err}");
+                    udev_monitor = None;
+                }
+            }
+        } else {
+            std::thread::sleep(Duration::from_millis(wake_timeout.max(1)));
+        }
+
+        if last_resync.elapsed() >= resync_interval {
+            backend.refresh_from_sysfs();
+            dispatch_battery_ui_update(
+                &main_context,
+                &label_weak,
+                backend.build_ui_update(&format, &format_icons),
+            );
+            last_resync = Instant::now();
+        }
+    }
+}
+
+fn dispatch_battery_ui_update(
+    main_context: &glib::MainContext,
+    label_weak: &glib::SendWeakRef<Label>,
+    update: BatteryUiUpdate,
+) {
+    let label_weak = label_weak.clone();
+    std::mem::drop(main_context.spawn(async move {
+        if let Some(label) = label_weak.upgrade() {
+            apply_battery_ui_update(&label, &update);
+        }
+    }));
+}
+
+fn millis_until_next_resync(last_resync: Instant, interval: Duration) -> u64 {
+    let elapsed = last_resync.elapsed();
+    if elapsed >= interval {
+        return 0;
+    }
+
+    interval
+        .saturating_sub(elapsed)
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+impl BatteryBackend {
+    fn new(preferred_device: Option<String>) -> Self {
+        Self {
+            preferred_device,
+            snapshot: None,
+            last_error: None,
+        }
+    }
+
+    fn refresh_from_sysfs(&mut self) {
+        match read_battery_snapshot(
             Path::new(POWER_SUPPLY_PATH),
-            preferred_device.as_deref(),
+            self.preferred_device.as_deref(),
         ) {
-            Ok(Some(snapshot)) => BatteryUiUpdate {
-                text: render_format(&poll_format, &snapshot, &format_icons),
+            Ok(snapshot) => {
+                self.snapshot = snapshot;
+                self.last_error = None;
+            }
+            Err(err) => {
+                self.snapshot = None;
+                self.last_error = Some(err);
+            }
+        }
+    }
+
+    fn build_ui_update(&self, format: &str, format_icons: &[String]) -> BatteryUiUpdate {
+        if let Some(snapshot) = self.snapshot.as_ref() {
+            return BatteryUiUpdate {
+                text: render_format(format, snapshot, format_icons),
                 visible: true,
                 level_class: battery_level_css_class(snapshot.capacity),
                 status_class: battery_status_css_class(&snapshot.status),
-            },
-            Ok(None) => BatteryUiUpdate {
-                text: String::new(),
-                visible: false,
-                level_class: "battery-unknown",
-                status_class: "status-unknown",
-            },
-            Err(err) => BatteryUiUpdate {
+            };
+        }
+
+        if let Some(err) = self.last_error.as_deref() {
+            return BatteryUiUpdate {
                 text: escape_markup_text(&format!("battery error: {err}")),
                 visible: true,
                 level_class: "battery-unknown",
                 status_class: "status-unknown",
-            },
-        };
-
-        let _ = sender.send(update);
-        std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
-    });
-
-    glib::timeout_add_local(Duration::from_millis(200), {
-        let label = label.clone();
-        move || {
-            while let Ok(update) = receiver.try_recv() {
-                label.set_visible(update.visible);
-                if update.visible {
-                    label.set_markup(&update.text);
-                }
-
-                for class_name in BATTERY_LEVEL_CLASSES {
-                    label.remove_css_class(class_name);
-                }
-                for class_name in BATTERY_STATUS_CLASSES {
-                    label.remove_css_class(class_name);
-                }
-                label.add_css_class(update.level_class);
-                label.add_css_class(update.status_class);
-            }
-            ControlFlow::Continue
+            };
         }
-    });
 
-    label
+        BatteryUiUpdate {
+            text: String::new(),
+            visible: false,
+            level_class: "battery-unknown",
+            status_class: "status-unknown",
+        }
+    }
+}
+
+impl UdevMonitor {
+    fn new() -> Result<Self, String> {
+        let builder = udev::MonitorBuilder::new().map_err(|err| err.to_string())?;
+        let builder = builder
+            .match_subsystem("power_supply")
+            .map_err(|err| err.to_string())?;
+        let monitor = builder.listen().map_err(|err| err.to_string())?;
+
+        Ok(Self { monitor })
+    }
+
+    fn fd(&self) -> i32 {
+        self.monitor.as_raw_fd()
+    }
+
+    fn drain_events(&mut self) -> bool {
+        let mut had_event = false;
+        for _ in self.monitor.iter() {
+            had_event = true;
+        }
+        had_event
+    }
+}
+
+fn wait_for_readable_fd(fd: i32, timeout_millis: u64) -> Result<bool, String> {
+    let mut pollfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+
+    let timeout_millis = timeout_millis.min(i32::MAX as u64) as i32;
+
+    loop {
+        // SAFETY: we pass a valid pointer to one pollfd entry and a correct count.
+        let rc = unsafe { libc::poll(&mut pollfd, 1, timeout_millis) };
+        if rc > 0 {
+            if (pollfd.revents & libc::POLLIN) != 0 {
+                return Ok(true);
+            }
+            return Err(format!("unexpected poll events: {}", pollfd.revents));
+        }
+
+        if rc == 0 {
+            return Ok(false);
+        }
+
+        let err = std::io::Error::last_os_error();
+        if err.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(format!("poll failed: {err}"));
+    }
 }
 
 fn read_battery_snapshot(

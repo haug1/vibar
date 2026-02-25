@@ -642,7 +642,7 @@ Fields:
   - Supports Pango markup.
   - Placeholder values are markup-escaped before insertion.
   - Default: `{capacity}% {icon}`
-- `interval_secs` (optional): poll interval in seconds.
+- `interval_secs` (optional): safety resync interval in seconds.
   - Default: `10`
   - Minimum: `1` (values below are clamped)
 - `device` (optional): preferred battery device in `/sys/class/power_supply` (for example `BAT0`).
@@ -666,6 +666,8 @@ Behavior:
 
 - Reads battery data from Linux `/sys/class/power_supply/*`.
 - Auto-discovers battery devices by `capacity` file + `BAT*` name or `type=Battery`.
+- Uses `udev` `power_supply` events as primary update trigger with immediate GTK main-thread dispatch.
+- Keeps `interval_secs` as a coarse periodic resync fallback/safety path (not the primary update cadence).
 - Hides the module when no battery device is available.
 - Adds battery-level CSS class on each update:
   - `battery-critical` for `< 15%`
