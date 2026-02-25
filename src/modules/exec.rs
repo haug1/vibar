@@ -114,6 +114,7 @@ pub(crate) fn build_exec_module(
         move || {
             while let Ok(rendered) = receiver.try_recv() {
                 label.set_markup(&rendered.text);
+                label.set_visible(rendered.visible);
                 for class_name in &active_dynamic_classes {
                     label.remove_css_class(class_name);
                 }
@@ -166,6 +167,7 @@ struct ExecSharedKey {
 struct ExecRenderedOutput {
     text: String,
     classes: Vec<String>,
+    visible: bool,
 }
 
 #[derive(Default)]
@@ -424,6 +426,7 @@ fn run_exec_command(command: &str, format: &str) -> ExecRenderedOutput {
         Err(err) => ExecRenderedOutput {
             text: escape_markup_text(&format!("exec error: {err}")),
             classes: Vec::new(),
+            visible: true,
         },
     }
 }
@@ -516,6 +519,7 @@ fn apply_exec_format(
     json_vars: HashMap<String, String>,
     template: &str,
 ) -> ExecRenderedOutput {
+    let visible = !text.trim().is_empty();
     let mut replacements: Vec<(String, String)> = vec![
         ("{}".to_string(), text.clone()),
         ("{text}".to_string(), text),
@@ -531,6 +535,7 @@ fn apply_exec_format(
     ExecRenderedOutput {
         text: rendered,
         classes,
+        visible,
     }
 }
 
@@ -632,6 +637,7 @@ mod tests {
         let output = run_exec_command("printf 'out'; printf 'err' >&2", "{text}");
         assert_eq!(output.text, "out");
         assert!(output.classes.is_empty());
+        assert!(output.visible);
     }
 
     #[test]
@@ -639,6 +645,15 @@ mod tests {
         let output = run_exec_command("printf 'err-only' >&2", "{text}");
         assert_eq!(output.text, "err-only");
         assert!(output.classes.is_empty());
+        assert!(output.visible);
+    }
+
+    #[test]
+    fn run_exec_command_hides_when_output_is_empty() {
+        let output = run_exec_command("printf ''", "{text}");
+        assert_eq!(output.text, "");
+        assert!(output.classes.is_empty());
+        assert!(!output.visible);
     }
 
     #[test]
@@ -646,6 +661,7 @@ mod tests {
         let output = parse_exec_output("42%\n\nmedium", "{text}");
         assert_eq!(output.text, "42%");
         assert_eq!(output.classes, vec!["medium"]);
+        assert!(output.visible);
     }
 
     #[test]
@@ -653,6 +669,7 @@ mod tests {
         let output = parse_exec_output(r#"{"text":"42%","class":"medium warning"}"#, "{text}");
         assert_eq!(output.text, "42%");
         assert_eq!(output.classes, vec!["medium", "warning"]);
+        assert!(output.visible);
     }
 
     #[test]
@@ -660,12 +677,14 @@ mod tests {
         let output = parse_exec_output(r#"{"text":"42%","class":["medium","battery"]}"#, "{text}");
         assert_eq!(output.text, "42%");
         assert_eq!(output.classes, vec!["medium", "battery"]);
+        assert!(output.visible);
     }
 
     #[test]
     fn parse_exec_output_applies_template_to_plain_text() {
         let output = parse_exec_output("42%", "<span style=\"italic\">{}</span>");
         assert_eq!(output.text, "<span style=\"italic\">42%</span>");
+        assert!(output.visible);
     }
 
     #[test]
@@ -675,6 +694,7 @@ mod tests {
             "{host} {text} {temp} {ok}",
         );
         assert_eq!(output.text, "n1 42% 66 true");
+        assert!(output.visible);
     }
 
     #[test]
@@ -684,6 +704,15 @@ mod tests {
             "<span>{name} {text}</span>",
         );
         assert_eq!(output.text, "<span>a&amp;b &lt;b&gt;x&lt;/b&gt;</span>");
+        assert!(output.visible);
+    }
+
+    #[test]
+    fn parse_exec_output_hides_when_text_is_empty() {
+        let output = parse_exec_output(r#"{"text":"","class":"idle"}"#, "{text}");
+        assert_eq!(output.text, "");
+        assert_eq!(output.classes, vec!["idle"]);
+        assert!(!output.visible);
     }
 
     #[test]
@@ -697,6 +726,7 @@ mod tests {
         backend.broadcast(ExecRenderedOutput {
             text: "42".to_string(),
             classes: vec!["ok".to_string()],
+            visible: true,
         });
 
         assert_eq!(
@@ -705,7 +735,8 @@ mod tests {
                 .expect("subscriber A should receive update"),
             ExecRenderedOutput {
                 text: "42".to_string(),
-                classes: vec!["ok".to_string()]
+                classes: vec!["ok".to_string()],
+                visible: true,
             }
         );
         assert_eq!(
@@ -714,7 +745,8 @@ mod tests {
                 .expect("subscriber B should receive update"),
             ExecRenderedOutput {
                 text: "42".to_string(),
-                classes: vec!["ok".to_string()]
+                classes: vec!["ok".to_string()],
+                visible: true,
             }
         );
     }
@@ -725,6 +757,7 @@ mod tests {
         backend.broadcast(ExecRenderedOutput {
             text: "latest".to_string(),
             classes: vec!["cached".to_string()],
+            visible: true,
         });
 
         let (sender, receiver) = mpsc::channel();
@@ -736,7 +769,8 @@ mod tests {
                 .expect("subscriber should receive latest value immediately"),
             ExecRenderedOutput {
                 text: "latest".to_string(),
-                classes: vec!["cached".to_string()]
+                classes: vec!["cached".to_string()],
+                visible: true,
             }
         );
     }
@@ -753,6 +787,7 @@ mod tests {
         backend.broadcast(ExecRenderedOutput {
             text: "x".to_string(),
             classes: Vec::new(),
+            visible: true,
         });
 
         let subscriber_count = backend

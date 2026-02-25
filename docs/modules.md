@@ -383,6 +383,7 @@ Behavior:
 
 - Shows command output in a label.
 - If stdout is empty, stderr is used as fallback text.
+- Module auto-hides when parsed output text is empty.
 - Output parsing is Waybar-compatible:
   - i3blocks style (default): line 1 = text, line 2 = tooltip (ignored), line 3 = CSS class list.
   - JSON style: if output is valid JSON, `text` and `class` fields are used (`class` supports string or string array).
