@@ -41,7 +41,8 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - When no external StatusNotifier watcher exists, `tray` starts an in-process watcher fallback and treats host registration as available (`IsStatusNotifierHostRegistered=true`)
 - Local watcher fallback prunes tray item IDs on DBus `NameOwnerChanged` owner-loss events to prevent lingering stale icons after app exit
 - `tray` hides items that report SNI `Status=Passive` (helps avoid stale/missing icons after item exit)
-- `tray` snapshot refresh is event-driven via DBus `NameOwnerChanged`, with `poll_interval_secs` retained as coarse fallback resync
+- `tray` snapshot refresh is event-driven via watcher register/unregister signals, tray item `PropertiesChanged`, and tray-relevant owner changes (`StatusNotifier`/`ayatana`), with debounced trigger coalescing and `poll_interval_secs` retained as coarse fallback resync
+- `tray` backend keeps a persistent session connection and avoids per-refresh host re-registration; tray UI reuses unchanged item widgets keyed by tray item id
 - `group` drawer popovers force upward placement (`MenuButton` direction `Up` + popover `Top` reasserted on show) to avoid flip-below behavior during live child-content updates
 - Built-in CSS adds extra padding to clickable modules inside `.group-popover` to improve drawer click targets
 - Config lookup order: `~/.config/vibar/config.jsonc`, then embedded `config.jsonc` in binary

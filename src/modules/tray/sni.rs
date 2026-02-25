@@ -1,12 +1,16 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
 use zbus::blocking::connection::Builder as ConnectionBuilder;
 use zbus::blocking::fdo::DBusProxy;
-use zbus::blocking::{Connection, Proxy};
+use zbus::blocking::{Connection, MessageIterator, Proxy};
 use zbus::message::Header;
+use zbus::message::Type as MessageType;
+use zbus::zvariant::OwnedValue;
 use zbus::Error as ZbusError;
+use zbus::MatchRule;
 use zbus::Result as ZbusResult;
 
 use super::types::{
@@ -89,6 +93,10 @@ impl LocalStatusNotifierWatcher {
 }
 
 static LOCAL_WATCHER_INIT: OnceLock<()> = OnceLock::new();
+const DBUS_PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
+const WATCHER_ITEM_REGISTERED_SIGNAL: &str = "StatusNotifierItemRegistered";
+const WATCHER_ITEM_UNREGISTERED_SIGNAL: &str = "StatusNotifierItemUnregistered";
+const PROPERTIES_CHANGED_SIGNAL: &str = "PropertiesChanged";
 
 pub(super) fn activate_item(destination: String, path: String, x: i32, y: i32) {
     call_item_method(destination, path, "Activate", x, y);
@@ -176,7 +184,27 @@ fn call_item_methods_with_fallback(
     });
 }
 
-pub(super) fn start_name_owner_listener(trigger_tx: std::sync::mpsc::Sender<()>) {
+pub(super) fn start_refresh_listeners(trigger_tx: std::sync::mpsc::Sender<()>) {
+    start_name_owner_listener(trigger_tx.clone());
+    start_watcher_item_listener(trigger_tx.clone(), WATCHER_ITEM_REGISTERED_SIGNAL);
+    start_watcher_item_listener(trigger_tx.clone(), WATCHER_ITEM_UNREGISTERED_SIGNAL);
+    start_item_properties_listener(trigger_tx);
+}
+
+pub(super) fn open_session_connection() -> Option<Connection> {
+    ensure_local_watcher_fallback();
+    match Connection::session() {
+        Ok(connection) => Some(connection),
+        Err(err) => {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: no session bus while initializing tray backend: {err}");
+            }
+            None
+        }
+    }
+}
+
+fn start_name_owner_listener(trigger_tx: std::sync::mpsc::Sender<()>) {
     thread::spawn(move || {
         let Ok(connection) = Connection::session() else {
             if tray_debug_enabled() {
@@ -202,27 +230,123 @@ pub(super) fn start_name_owner_listener(trigger_tx: std::sync::mpsc::Sender<()>)
                 continue;
             };
             let name = args.name().to_string();
-            // Refresh on likely tray-relevant owner changes, while avoiding full refresh for every bus event.
-            if name.starts_with(':') || name.contains("StatusNotifier") || name.contains("ayatana")
-            {
+            // Refresh only for tray-related names to avoid turning generic DBus churn
+            // into continuous tray snapshot rebuilds.
+            if is_tray_relevant_name(&name) {
                 let _ = trigger_tx.send(());
             }
         }
     });
 }
 
-pub(super) fn fetch_tray_snapshot() -> Vec<TrayItemSnapshot> {
-    ensure_local_watcher_fallback();
+fn is_tray_relevant_name(name: &str) -> bool {
+    name.contains("StatusNotifier") || name.contains("ayatana")
+}
 
-    let Ok(connection) = Connection::session() else {
-        if tray_debug_enabled() {
-            eprintln!("vibar/tray: no session bus while fetching tray snapshot");
+fn start_watcher_item_listener(trigger_tx: std::sync::mpsc::Sender<()>, member: &'static str) {
+    thread::spawn(move || {
+        let Ok(connection) = Connection::session() else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: failed to open session bus for watcher signal listener");
+            }
+            return;
+        };
+
+        let rule = match MatchRule::builder()
+            .msg_type(MessageType::Signal)
+            .interface(WATCHER_INTERFACE)
+            .and_then(|builder| builder.member(member))
+            .and_then(|builder| builder.path(WATCHER_PATH))
+            .map(|builder| builder.build())
+        {
+            Ok(rule) => rule,
+            Err(err) => {
+                if tray_debug_enabled() {
+                    eprintln!(
+                        "vibar/tray: failed to build watcher signal match rule ({member}): {err}"
+                    );
+                }
+                return;
+            }
+        };
+
+        let Ok(iterator) = MessageIterator::for_match_rule(rule, &connection, Some(256)) else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: failed to subscribe to watcher signal ({member})");
+            }
+            return;
+        };
+
+        for message in iterator {
+            if message.is_ok() {
+                let _ = trigger_tx.send(());
+            }
         }
-        return Vec::new();
+    });
+}
+
+fn start_item_properties_listener(trigger_tx: std::sync::mpsc::Sender<()>) {
+    thread::spawn(move || {
+        let Ok(connection) = Connection::session() else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: failed to open session bus for item property listener");
+            }
+            return;
+        };
+
+        let rule = match MatchRule::builder()
+            .msg_type(MessageType::Signal)
+            .interface(DBUS_PROPERTIES_INTERFACE)
+            .and_then(|builder| builder.member(PROPERTIES_CHANGED_SIGNAL))
+            .map(|builder| builder.build())
+        {
+            Ok(rule) => rule,
+            Err(err) => {
+                if tray_debug_enabled() {
+                    eprintln!("vibar/tray: failed to build properties signal match rule: {err}");
+                }
+                return;
+            }
+        };
+
+        let Ok(iterator) = MessageIterator::for_match_rule(rule, &connection, Some(512)) else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: failed to subscribe to properties signal");
+            }
+            return;
+        };
+
+        for message in iterator {
+            let Ok(message) = message else {
+                continue;
+            };
+            if is_tray_item_properties_changed(&message) {
+                let _ = trigger_tx.send(());
+            }
+        }
+    });
+}
+
+fn is_tray_item_properties_changed(message: &zbus::Message) -> bool {
+    let Ok((interface_name, changed, invalidated)) =
+        message
+            .body()
+            .deserialize::<(String, HashMap<String, OwnedValue>, Vec<String>)>()
+    else {
+        return false;
     };
 
+    interface_name == ITEM_INTERFACE && (!changed.is_empty() || !invalidated.is_empty())
+}
+
+pub(super) fn fetch_tray_snapshot_with_connection(
+    connection: &Connection,
+    host_registered: &mut bool,
+) -> Vec<TrayItemSnapshot> {
+    ensure_local_watcher_fallback();
+
     let Ok(watcher) = Proxy::new(
-        &connection,
+        connection,
         WATCHER_DESTINATION,
         WATCHER_PATH,
         WATCHER_INTERFACE,
@@ -232,16 +356,25 @@ pub(super) fn fetch_tray_snapshot() -> Vec<TrayItemSnapshot> {
                 "vibar/tray: failed to create watcher proxy {WATCHER_DESTINATION}{WATCHER_PATH}"
             );
         }
+        *host_registered = false;
         return Vec::new();
     };
 
-    // Empty host name tells watcher to use sender bus name for registration.
-    let host_name = "";
-    let _register_result: ZbusResult<()> =
-        watcher.call("RegisterStatusNotifierHost", &(host_name,));
-    if tray_debug_enabled() {
-        if let Err(err) = &_register_result {
-            eprintln!("vibar/tray: RegisterStatusNotifierHost failed: {err}");
+    if !*host_registered {
+        // Empty host name tells watcher to use sender bus name for registration.
+        let host_name = "";
+        let register_result: ZbusResult<()> =
+            watcher.call("RegisterStatusNotifierHost", &(host_name,));
+        match register_result {
+            Ok(()) => {
+                *host_registered = true;
+            }
+            Err(err) => {
+                if tray_debug_enabled() {
+                    eprintln!("vibar/tray: RegisterStatusNotifierHost failed: {err}");
+                }
+                return Vec::new();
+            }
         }
     }
 
@@ -268,7 +401,7 @@ pub(super) fn fetch_tray_snapshot() -> Vec<TrayItemSnapshot> {
             }
             parsed
         })
-        .filter_map(|(id, destination, path)| fetch_item(&connection, id, destination, path))
+        .filter_map(|(id, destination, path)| fetch_item(connection, id, destination, path))
         .collect::<Vec<_>>();
 
     snapshots.sort_by(|a, b| a.id.cmp(&b.id));
@@ -536,8 +669,8 @@ fn is_method_missing_error(err: &ZbusError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_item_owned_by_name, normalize_registered_item_id, parse_item_address,
-        remove_registered_items_for_name, select_icon_pixmap,
+        is_item_owned_by_name, is_tray_relevant_name, normalize_registered_item_id,
+        parse_item_address, remove_registered_items_for_name, select_icon_pixmap,
     };
 
     #[test]
@@ -603,5 +736,12 @@ mod tests {
     fn is_item_owned_by_name_checks_boundary() {
         assert!(is_item_owned_by_name(":1.5/StatusNotifierItem", ":1.5"));
         assert!(!is_item_owned_by_name(":1.50/StatusNotifierItem", ":1.5"));
+    }
+
+    #[test]
+    fn is_tray_relevant_name_ignores_unique_bus_names() {
+        assert!(!is_tray_relevant_name(":1.2048"));
+        assert!(is_tray_relevant_name("org.kde.StatusNotifierWatcher"));
+        assert!(is_tray_relevant_name("org.ayatana.indicator.application"));
     }
 }

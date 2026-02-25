@@ -28,7 +28,10 @@ This document contains implementation-facing details that are intentionally kept
 - Tray module accepts both canonical watcher item addresses (`service/path`) and service-only entries (defaults to `/StatusNotifierItem`) when building SNI proxies.
 - Tray module includes an in-process `StatusNotifierWatcher` fallback when no external watcher is present; fallback reports host-registered state as `true` and logs registration calls when `VIBAR_DEBUG_TRAY=1`.
 - Fallback watcher tracks DBus `NameOwnerChanged` to prune registered item IDs whose owner disappears, preventing stale tray entries after app exit.
-- Tray refresh cadence is primarily event-driven (`NameOwnerChanged` listener) with interval polling retained only as coarse fallback/resync.
+- Tray refresh cadence is event-driven via StatusNotifier watcher signals (`StatusNotifierItemRegistered`/`StatusNotifierItemUnregistered`), tray item `PropertiesChanged`, and tray-relevant owner changes (`StatusNotifier`/`ayatana`); interval polling is retained as coarse fallback/resync.
+- Tray backend now keeps a persistent session connection and one-time host registration state (per connection), rather than reconnecting/re-registering each refresh.
+- Tray refresh requests are debounced before snapshot fetches to collapse bursty DBus signal storms.
+- Tray GTK rendering reuses unchanged item widgets keyed by tray item id and recreates only changed entries.
 - Tray snapshot building skips items that report SNI `Status=Passive` to avoid stale/missing-icon entries after app exit.
 - Backlight module runs an event-driven backend for `/sys/class/backlight` with cached device/snapshot state, dispatches UI updates immediately on GTK main context, uses `udev` callbacks as primary trigger, and keeps interval-based resync as fallback/safety; supports explicit `device` selection or largest-`max_brightness` fallback.
 - Backlight default scroll behavior uses logind DBus `SetBrightness`; optional `on-scroll-up`/`on-scroll-down` commands can override that behavior.

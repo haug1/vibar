@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use glib::ControlFlow;
 use gtk::gdk::{MemoryFormat, MemoryTexture, Texture};
@@ -24,6 +25,14 @@ use types::{
     TrayConfig, TrayIconPixmap, TrayItemSnapshot, MIN_ICON_SIZE, MIN_POLL_INTERVAL_SECS,
     MODULE_TYPE,
 };
+
+const REFRESH_DEBOUNCE_MILLIS: u64 = 120;
+
+#[derive(Clone)]
+struct RenderedTrayItem {
+    snapshot: TrayItemSnapshot,
+    button: Button,
+}
 
 pub(crate) struct TrayFactory;
 
@@ -74,13 +83,27 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
     let (refresh_tx, refresh_rx) = mpsc::channel::<()>();
 
     thread::spawn(move || {
-        sni::start_name_owner_listener(refresh_tx);
+        sni::start_refresh_listeners(refresh_tx);
 
         let mut last = Vec::<TrayItemSnapshot>::new();
-        while let Ok(_) | Err(RecvTimeoutError::Timeout) =
+        let mut host_registered = false;
+        let mut connection = sni::open_session_connection();
+
+        while let Ok(()) | Err(RecvTimeoutError::Timeout) =
             refresh_rx.recv_timeout(Duration::from_secs(u64::from(poll_interval_secs)))
         {
-            let snapshot = sni::fetch_tray_snapshot();
+            coalesce_refresh_events(&refresh_rx, Duration::from_millis(REFRESH_DEBOUNCE_MILLIS));
+
+            if connection.is_none() {
+                connection = sni::open_session_connection();
+                host_registered = false;
+            }
+
+            let snapshot = connection
+                .as_ref()
+                .map(|conn| sni::fetch_tray_snapshot_with_connection(conn, &mut host_registered))
+                .unwrap_or_default();
+
             if snapshot != last {
                 if sender.send(snapshot.clone()).is_err() {
                     return;
@@ -93,6 +116,7 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
     glib::timeout_add_local(Duration::from_millis(250), {
         let container = container.clone();
         let mut current = Vec::<TrayItemSnapshot>::new();
+        let mut rendered = HashMap::<String, RenderedTrayItem>::new();
 
         move || {
             let mut next = None;
@@ -102,7 +126,7 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
 
             if let Some(snapshot) = next {
                 if snapshot != current {
-                    render_tray_items(&container, &snapshot, icon_size);
+                    render_tray_items(&container, &snapshot, icon_size, &mut rendered);
                     current = snapshot;
                 }
             }
@@ -114,52 +138,101 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
     container
 }
 
-fn render_tray_items(container: &GtkBox, items: &[TrayItemSnapshot], icon_size: i32) {
+fn coalesce_refresh_events(refresh_rx: &mpsc::Receiver<()>, debounce: Duration) {
+    let deadline = Instant::now() + debounce;
+    loop {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        match refresh_rx.recv_timeout(remaining) {
+            Ok(()) => {}
+            Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+fn render_tray_items(
+    container: &GtkBox,
+    items: &[TrayItemSnapshot],
+    icon_size: i32,
+    rendered: &mut HashMap<String, RenderedTrayItem>,
+) {
+    let desired_ids = items
+        .iter()
+        .map(|item| item.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    rendered.retain(|id, existing| {
+        if desired_ids.contains(id) {
+            true
+        } else {
+            container.remove(&existing.button);
+            false
+        }
+    });
+
+    for item in items {
+        let should_replace = rendered
+            .get(&item.id)
+            .map(|existing| existing.snapshot != *item)
+            .unwrap_or(true);
+
+        if should_replace {
+            if let Some(existing) = rendered.remove(&item.id) {
+                container.remove(&existing.button);
+            }
+
+            let button = build_item_button(item, icon_size);
+            rendered.insert(
+                item.id.clone(),
+                RenderedTrayItem {
+                    snapshot: item.clone(),
+                    button,
+                },
+            );
+        }
+    }
+
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
-
     for item in items {
-        let button = Button::new();
-        button.add_css_class("tray-item");
-        button.set_focusable(false);
-        button.set_tooltip_text(Some(&item.title));
-
-        let image = image_for_item(item, icon_size);
-        image.set_pixel_size(icon_size);
-        button.set_child(Some(&image));
-
-        let destination = item.destination.clone();
-        let path = item.path.clone();
-        let click_button = button.clone();
-        let click = GestureClick::builder().button(0).build();
-        click.connect_pressed(move |gesture, _, x, y| {
-            let current_button = gesture.current_button();
-            match current_button {
-                1 => sni::activate_item(destination.clone(), path.clone(), x as i32, y as i32),
-                2 => sni::secondary_activate_item(
-                    destination.clone(),
-                    path.clone(),
-                    x as i32,
-                    y as i32,
-                ),
-                3 => {
-                    if !menu_ui::show_item_menu(&click_button, destination.clone(), path.clone()) {
-                        sni::context_menu_item(
-                            destination.clone(),
-                            path.clone(),
-                            x as i32,
-                            y as i32,
-                        );
-                    }
-                }
-                _ => {}
-            }
-        });
-        button.add_controller(click);
-
-        container.append(&button);
+        if let Some(existing) = rendered.get(&item.id) {
+            container.append(&existing.button);
+        }
     }
+}
+
+fn build_item_button(item: &TrayItemSnapshot, icon_size: i32) -> Button {
+    let button = Button::new();
+    button.add_css_class("tray-item");
+    button.set_focusable(false);
+    button.set_tooltip_text(Some(&item.title));
+
+    let image = image_for_item(item, icon_size);
+    image.set_pixel_size(icon_size);
+    button.set_child(Some(&image));
+
+    let destination = item.destination.clone();
+    let path = item.path.clone();
+    let click_button = button.clone();
+    let click = GestureClick::builder().button(0).build();
+    click.connect_pressed(move |gesture, _, x, y| {
+        let current_button = gesture.current_button();
+        match current_button {
+            1 => sni::activate_item(destination.clone(), path.clone(), x as i32, y as i32),
+            2 => {
+                sni::secondary_activate_item(destination.clone(), path.clone(), x as i32, y as i32)
+            }
+            3 => {
+                if !menu_ui::show_item_menu(&click_button, destination.clone(), path.clone()) {
+                    sni::context_menu_item(destination.clone(), path.clone(), x as i32, y as i32);
+                }
+            }
+            _ => {}
+        }
+    });
+    button.add_controller(click);
+    button
 }
 
 fn image_for_item(item: &TrayItemSnapshot, icon_size: i32) -> Image {
