@@ -30,6 +30,18 @@ make build
 make run
 ```
 
+Install system-wide:
+
+```bash
+make build-release
+make install
+```
+
+Notes:
+- `make build-release` compiles as your current user (so cargo caches are reused).
+- `make install` only copies `target/release/vibar` into install location.
+- Installs binary to `/usr/local/bin/vibar` by default (`PREFIX`/`BINDIR` override supported).
+
 ## Verification
 
 Run individual checks:
@@ -72,7 +84,7 @@ make ci
 - PulseAudio module supports optional popup controls for default sink mute/volume, active app stream volume/mute, and output-port switching, plus separate left/right click commands
 - Config file search order:
   - `~/.config/vibar/config.jsonc`
-  - `./config.jsonc` (fallback)
+  - embedded `config.jsonc` bundled in binary (final fallback)
 - CSS layering support:
   - embedded default `style.css`
   - optional user CSS loaded on top

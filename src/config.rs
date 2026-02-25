@@ -69,7 +69,9 @@ fn default_right() -> Vec<ModuleConfig> {
     vec![crate::modules::clock::default_module_config()]
 }
 
-const PROJECT_CONFIG_PATH: &str = "./config.jsonc";
+const CONFIG_BASENAME: &str = "config.jsonc";
+const APP_CONFIG_DIRNAME: &str = "vibar";
+const EMBEDDED_DEFAULT_CONFIG: &str = include_str!("../config.jsonc");
 
 pub(crate) fn load_config() -> LoadedConfig {
     let candidate_paths = default_config_paths();
@@ -83,7 +85,6 @@ fn default_config_paths() -> Vec<PathBuf> {
         paths.push(path);
     }
 
-    paths.push(PathBuf::from(PROJECT_CONFIG_PATH));
     paths
 }
 
@@ -91,16 +92,16 @@ fn home_config_path() -> Option<PathBuf> {
     if let Ok(xdg_config_home) = env::var("XDG_CONFIG_HOME") {
         return Some(
             PathBuf::from(xdg_config_home)
-                .join("vibar")
-                .join("config.jsonc"),
+                .join(APP_CONFIG_DIRNAME)
+                .join(CONFIG_BASENAME),
         );
     }
 
     env::var("HOME").ok().map(|home| {
         PathBuf::from(home)
             .join(".config")
-            .join("vibar")
-            .join("config.jsonc")
+            .join(APP_CONFIG_DIRNAME)
+            .join(CONFIG_BASENAME)
     })
 }
 
@@ -122,9 +123,18 @@ fn load_config_from_paths(paths: &[PathBuf]) -> LoadedConfig {
         }
     }
 
-    LoadedConfig {
-        config: Config::default(),
-        source_path: None,
+    match parse_config(EMBEDDED_DEFAULT_CONFIG) {
+        Ok(cfg) => LoadedConfig {
+            config: cfg,
+            source_path: None,
+        },
+        Err(err) => {
+            eprintln!("Failed to parse embedded default config: {err}");
+            LoadedConfig {
+                config: Config::default(),
+                source_path: None,
+            }
+        }
     }
 }
 
@@ -173,9 +183,10 @@ mod tests {
     #[test]
     fn load_config_missing_files_returns_defaults() {
         let cfg = load_config_from_paths(&[PathBuf::from("./this-file-should-not-exist.jsonc")]);
-        assert_eq!(cfg.config.areas.left.len(), 1);
-        assert_eq!(cfg.config.areas.center.len(), 0);
-        assert_eq!(cfg.config.areas.right.len(), 1);
+        let embedded = parse_config(EMBEDDED_DEFAULT_CONFIG).expect("embedded config should parse");
+        assert_eq!(cfg.config.areas.left.len(), embedded.areas.left.len());
+        assert_eq!(cfg.config.areas.center.len(), embedded.areas.center.len());
+        assert_eq!(cfg.config.areas.right.len(), embedded.areas.right.len());
         assert!(cfg.source_path.is_none());
     }
 

@@ -36,7 +36,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `playerctl` shows a visible `…` cue when text is truncated
 - `playerctl` hover tooltip appears only when text is truncated
 - `pulseaudio` supports optional popup controls (`controls.enabled`) for default sink mute/volume, active sink-input streams (per-app mute/volume), output-device switching (default sink selection), and per-device output port switching; also supports optional `right-click`/`on-right-click` command binding (ignored when `controls.open=right-click`)
-- Config lookup order: `~/.config/vibar/config.jsonc` then `./config.jsonc`
+- Config lookup order: `~/.config/vibar/config.jsonc`, then embedded `config.jsonc` in binary
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
 
@@ -45,7 +45,9 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Install deps: `make deps`
 - Generate lockfile: `make lock`
 - Build: `make build`
+- Build release: `make build-release`
 - Run: `make run`
+- Install: `make install` (copies prebuilt release binary only)
 - CI-equivalent checks: `make ci`
 
 ## Docs And Entry Points

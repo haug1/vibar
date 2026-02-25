@@ -33,7 +33,7 @@ This document contains implementation-facing details that are intentionally kept
 - `sway/mode` tracks active sway binding mode (`get_binding_state`) and hides itself when mode is `default`.
 - `sway/window` supports markup-aware `format` with `{}`/`{title}` placeholders for focused title rendering.
 - Markup-capable format modules (`sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `temperature`, `disk`, `backlight`, `battery`, `pulseaudio`) render via Pango markup and escape replacement values before insertion.
-- Config loading prefers `~/.config/vibar/config.jsonc`, then falls back to `./config.jsonc`.
+- Config loading prefers `~/.config/vibar/config.jsonc`, then embedded `config.jsonc` bundled in binary.
 - Top-level style config supports layered CSS (`style.load-default` + `style.path`).
 - Embedded default stylesheet includes small utility classes (`v-pill`, `v-square`) for quick module appearance tuning from config.
 
