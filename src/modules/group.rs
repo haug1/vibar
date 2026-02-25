@@ -1,5 +1,7 @@
 use gtk::prelude::*;
-use gtk::{Box as GtkBox, Label, MenuButton, Orientation, Popover, PositionType, Widget};
+use gtk::{
+    ArrowType, Box as GtkBox, Label, MenuButton, Orientation, Popover, PositionType, Widget,
+};
 use serde::de::Deserializer;
 use serde::Deserialize;
 use serde_json::Value;
@@ -109,6 +111,7 @@ fn build_group_module(config: GroupConfig, context: &ModuleBuildContext) -> Resu
         let toggle = MenuButton::new();
         toggle.add_css_class("group-toggle");
         toggle.set_focusable(false);
+        toggle.set_direction(ArrowType::Up);
         let toggle_label = Label::new(Some(if drawer.start_open {
             &drawer.label_open
         } else {
@@ -129,7 +132,8 @@ fn build_group_module(config: GroupConfig, context: &ModuleBuildContext) -> Resu
         let closed_label = drawer.label_closed;
         let label_for_show = toggle_label.clone();
         let open_label_for_show = open_label.clone();
-        popover.connect_show(move |_| {
+        popover.connect_show(move |popover| {
+            popover.set_position(PositionType::Top);
             label_for_show.set_text(open_label_for_show.as_str());
         });
         let label_for_hide = toggle_label.clone();

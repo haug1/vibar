@@ -41,6 +41,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Local watcher fallback prunes tray item IDs on DBus `NameOwnerChanged` owner-loss events to prevent lingering stale icons after app exit
 - `tray` hides items that report SNI `Status=Passive` (helps avoid stale/missing icons after item exit)
 - `tray` snapshot refresh is event-driven via DBus `NameOwnerChanged`, with `poll_interval_secs` retained as coarse fallback resync
+- `group` drawer popovers force upward placement (`MenuButton` direction `Up` + popover `Top` reasserted on show) to avoid flip-below behavior during live child-content updates
 - Config lookup order: `~/.config/vibar/config.jsonc`, then embedded `config.jsonc` in binary
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
