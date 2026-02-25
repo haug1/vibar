@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -291,6 +292,8 @@ fn exec_signal_registry() -> &'static Mutex<ExecSignalRegistry> {
 }
 
 fn register_exec_signal(signum: i32, backend: &Arc<SharedExecBackend>) {
+    ensure_exec_signal_dispatch_ready();
+
     let should_install = {
         let mut registry = exec_signal_registry()
             .lock()
@@ -306,10 +309,7 @@ fn register_exec_signal(signum: i32, backend: &Arc<SharedExecBackend>) {
     };
 
     if should_install {
-        glib::source::unix_signal_add_local(signum, move || {
-            notify_exec_signal(signum);
-            ControlFlow::Continue
-        });
+        install_exec_signal_handler(signum);
     }
 }
 
@@ -324,6 +324,81 @@ fn notify_exec_signal(signum: i32) {
 
     for backend in backends {
         backend.request_refresh();
+    }
+}
+
+static EXEC_SIGNAL_PIPE_WRITE_FD: AtomicI32 = AtomicI32::new(-1);
+
+fn ensure_exec_signal_dispatch_ready() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        let mut fds = [0; 2];
+        let pipe_result = unsafe { libc::pipe(fds.as_mut_ptr()) };
+        if pipe_result != 0 {
+            eprintln!("vibar/exec: failed to initialize signal pipe");
+            return;
+        }
+
+        for &fd in &fds {
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags >= 0 {
+                let _ = unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+            }
+
+            let fd_flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+            if fd_flags >= 0 {
+                let _ = unsafe { libc::fcntl(fd, libc::F_SETFD, fd_flags | libc::FD_CLOEXEC) };
+            }
+        }
+
+        let read_fd = fds[0];
+        let write_fd = fds[1];
+        EXEC_SIGNAL_PIPE_WRITE_FD.store(write_fd, Ordering::Relaxed);
+
+        glib::source::unix_fd_add_local(read_fd, glib::IOCondition::IN, move |_, _| {
+            drain_exec_signal_pipe(read_fd);
+            ControlFlow::Continue
+        });
+    });
+}
+
+fn install_exec_signal_handler(signum: i32) {
+    let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+    action.sa_flags = 0;
+    action.sa_sigaction = exec_signal_handler as *const () as usize;
+    unsafe {
+        libc::sigemptyset(&mut action.sa_mask);
+    }
+
+    let rc = unsafe { libc::sigaction(signum, &action, std::ptr::null_mut()) };
+    if rc != 0 {
+        eprintln!("vibar/exec: failed to install signal handler for signal {signum}");
+    }
+}
+
+extern "C" fn exec_signal_handler(signum: libc::c_int) {
+    let write_fd = EXEC_SIGNAL_PIPE_WRITE_FD.load(Ordering::Relaxed);
+    if write_fd < 0 {
+        return;
+    }
+
+    let bytes = signum.to_ne_bytes();
+    let _ = unsafe { libc::write(write_fd, bytes.as_ptr().cast(), bytes.len()) };
+}
+
+fn drain_exec_signal_pipe(read_fd: i32) {
+    let mut bytes = [0_u8; std::mem::size_of::<libc::c_int>()];
+    loop {
+        let rc = unsafe { libc::read(read_fd, bytes.as_mut_ptr().cast(), bytes.len()) };
+        if rc == bytes.len() as isize {
+            let signum = i32::from_ne_bytes(bytes);
+            notify_exec_signal(signum);
+            continue;
+        }
+
+        if rc <= 0 {
+            break;
+        }
     }
 }
 
