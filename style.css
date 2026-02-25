@@ -143,6 +143,11 @@
   opacity: 1;
 }
 
+/* Increase drawer item hit area without affecting inline bar modules. */
+.group-popover .module.clickable {
+  padding: 4px 10px;
+}
+
 /* Common module text emphasis */
 .clock,
 .playerctl,

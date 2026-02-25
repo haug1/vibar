@@ -122,6 +122,7 @@ Styling:
 - Drawer popover class: `.group-popover`
 - Child row container class: `.group-content`
 - Optional extra class via `class` field.
+- Built-in default CSS increases padding for `.group-popover .module.clickable` to improve drawer click target size.
 
 ## `sway/workspaces`
 
