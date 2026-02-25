@@ -72,6 +72,16 @@
         // "on-scroll-down": "brightnessctl set 1%-",
       },
       {
+        "type": "battery",
+        "class": "v-square",
+        "format": "{capacity}% {icon}",
+        "interval_secs": 10,
+        // Optional explicit battery device under /sys/class/power_supply:
+        // "device": "BAT0",
+        // Optional icon progression from low to high:
+        // "format-icons": ["", "", "", "", ""],
+      },
+      {
         "type": "pulseaudio",
         "click": "pavucontrol",
         "controls": {

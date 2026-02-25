@@ -1,4 +1,5 @@
 pub(crate) mod backlight;
+pub(crate) mod battery;
 pub(crate) mod clock;
 pub(crate) mod cpu;
 pub(crate) mod disk;
@@ -44,6 +45,7 @@ pub(crate) trait ModuleFactory {
 
 const FACTORIES: &[&dyn ModuleFactory] = &[
     &backlight::FACTORY,
+    &battery::FACTORY,
     &exec::FACTORY,
     &cpu::FACTORY,
     &disk::FACTORY,

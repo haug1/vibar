@@ -4,7 +4,7 @@ This document contains implementation-facing details that are intentionally kept
 
 ## Architecture
 
-- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `backlight`, `playerctl`, `sway/workspaces`, `sway/mode`, `sway/window`, `pulseaudio`).
+- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `backlight`, `battery`, `playerctl`, `sway/workspaces`, `sway/mode`, `sway/window`, `pulseaudio`).
 - `src/modules/mod.rs` stores raw module config entries:
   - `type: String`
   - module-specific fields as a dynamic map (`serde_json::Map<String, Value>`)
@@ -27,10 +27,11 @@ This document contains implementation-facing details that are intentionally kept
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`, and supports an optional popover controls UI (default sink mute/volume, active sink-input stream mute/volume, output-device switching via `set_default_sink`, and per-device port switching).
 - Backlight module runs an event-driven backend for `/sys/class/backlight` with cached device/snapshot state, dispatches UI updates immediately on GTK main context, uses `udev` callbacks as primary trigger, and keeps interval-based resync as fallback/safety; supports explicit `device` selection or largest-`max_brightness` fallback.
 - Backlight default scroll behavior uses logind DBus `SetBrightness`; optional `on-scroll-up`/`on-scroll-down` commands can override that behavior.
+- Battery module polls `/sys/class/power_supply`, auto-discovers battery devices (or uses explicit `device`), and maps capacity/status to dynamic CSS classes for styling.
 - `sway/workspaces` supports module-level `class` and per-button `button-class`/`button_class` style hooks.
 - `sway/mode` tracks active sway binding mode (`get_binding_state`) and hides itself when mode is `default`.
 - `sway/window` supports markup-aware `format` with `{}`/`{title}` placeholders for focused title rendering.
-- Markup-capable format modules (`sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, `backlight`, `pulseaudio`) render via Pango markup and escape replacement values before insertion.
+- Markup-capable format modules (`sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, `backlight`, `battery`, `pulseaudio`) render via Pango markup and escape replacement values before insertion.
 - Config loading prefers `~/.config/vibar/config.jsonc`, then falls back to `./config.jsonc`.
 - Top-level style config supports layered CSS (`style.load-default` + `style.path`).
 - Embedded default stylesheet includes small utility classes (`v-pill`, `v-square`) for quick module appearance tuning from config.

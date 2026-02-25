@@ -27,6 +27,7 @@ Top-level config uses three layout areas:
       },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
       { "type": "cpu", "format": "{used_percentage}% ", "interval_secs": 1 },
+      { "type": "battery", "format": "{capacity}% {icon}" },
       { "type": "clock" },
     ],
   },
@@ -617,6 +618,73 @@ Styling:
 
 - Label classes: `.module.backlight`
 - Dynamic brightness classes: `.brightness-low`, `.brightness-medium`, `.brightness-high`, `.brightness-unknown`
+- Optional extra class via `class` field.
+
+## `battery`
+
+Schema:
+
+```json
+{
+  "type": "battery",
+  "format": "{capacity}% {icon}",
+  "interval_secs": 10,
+  "device": "BAT0",
+  "format-icons": ["", "", "", "", ""],
+  "click": "optional shell command",
+  "class": "optional-css-classes"
+}
+```
+
+Fields:
+
+- `format` (optional): output format template.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
+  - Default: `{capacity}% {icon}`
+- `interval_secs` (optional): poll interval in seconds.
+  - Default: `10`
+  - Minimum: `1` (values below are clamped)
+- `device` (optional): preferred battery device in `/sys/class/power_supply` (for example `BAT0`).
+  - If omitted, module auto-discovers battery devices and picks the first device name in sorted order.
+- `format-icons` (optional): icon list mapped by battery percentage.
+  - Empty list renders `{icon}` as empty text.
+  - Default: `["", "", "", "", ""]`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click`.
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+
+Format placeholders:
+
+- `{capacity}`
+- `{percent}` (alias of `{capacity}`)
+- `{status}`
+- `{icon}`
+- `{device}`
+
+Behavior:
+
+- Reads battery data from Linux `/sys/class/power_supply/*`.
+- Auto-discovers battery devices by `capacity` file + `BAT*` name or `type=Battery`.
+- Hides the module when no battery device is available.
+- Adds battery-level CSS class on each update:
+  - `battery-critical` for `< 15%`
+  - `battery-low` for `15-34%`
+  - `battery-medium` for `35-69%`
+  - `battery-high` for `>= 70%`
+  - `battery-unknown` when polling fails
+- Adds battery-status CSS class on each update:
+  - `status-charging`
+  - `status-discharging`
+  - `status-full`
+  - `status-not-charging`
+  - `status-unknown`
+
+Styling:
+
+- Label classes: `.module.battery`
+- Dynamic level classes: `.battery-critical`, `.battery-low`, `.battery-medium`, `.battery-high`, `.battery-unknown`
+- Dynamic status classes: `.status-charging`, `.status-discharging`, `.status-full`, `.status-not-charging`, `.status-unknown`
 - Optional extra class via `class` field.
 
 ## `tray`

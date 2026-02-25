@@ -157,6 +157,14 @@
   background: rgba(255, 84, 84, 0.25);
 }
 
+.battery.battery-critical {
+  background: rgba(255, 84, 84, 0.25);
+}
+
+.battery.status-charging {
+  color: #b2ffc9;
+}
+
 .playerctl.status-playing {
   opacity: 1;
 }
