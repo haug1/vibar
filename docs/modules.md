@@ -111,6 +111,7 @@ Behavior:
 - Group container can be styled as one unit while preserving child module behavior.
 - With `drawer` enabled, child modules are shown in a popover positioned above the bar toggle (context-menu style).
 - Drawer popover content is vertical.
+- Drawer child modules stretch to fill popover width, so full row area is interactive for clickable modules.
 - Child module initialization errors include the failing child index.
 - Group modules can be nested.
 

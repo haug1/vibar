@@ -45,6 +45,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `tray` backend keeps a persistent session connection and avoids per-refresh host re-registration; tray UI reuses unchanged item widgets keyed by tray item id
 - `group` drawer popovers force upward placement (`MenuButton` direction `Up` + popover `Top` reasserted on show) to avoid flip-below behavior during live child-content updates
 - Built-in CSS adds extra padding to clickable modules inside `.group-popover` to improve drawer click targets
+- Group drawer child modules use fill/expand horizontal alignment so each item occupies full popover row width
 - Config lookup order: `~/.config/vibar/config.jsonc`, then embedded `config.jsonc` in binary
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS

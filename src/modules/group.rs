@@ -1,6 +1,6 @@
 use gtk::prelude::*;
 use gtk::{
-    ArrowType, Box as GtkBox, Label, MenuButton, Orientation, Popover, PositionType, Widget,
+    Align, ArrowType, Box as GtkBox, Label, MenuButton, Orientation, Popover, PositionType, Widget,
 };
 use serde::de::Deserializer;
 use serde::Deserialize;
@@ -89,6 +89,7 @@ fn build_group_module(config: GroupConfig, context: &ModuleBuildContext) -> Resu
 
     apply_css_classes(&container, config.class.as_deref());
 
+    let drawer_enabled = config.drawer.is_some();
     let child_orientation = if config.drawer.is_some() {
         Orientation::Vertical
     } else {
@@ -102,6 +103,10 @@ fn build_group_module(config: GroupConfig, context: &ModuleBuildContext) -> Resu
     for (idx, child_config) in config.modules.iter().enumerate() {
         let widget = build_module(child_config, context)
             .map_err(|err| format!("invalid child module at index {idx}: {err}"))?;
+        if drawer_enabled {
+            widget.set_halign(Align::Fill);
+            widget.set_hexpand(true);
+        }
         child_container.append(&widget);
     }
 
