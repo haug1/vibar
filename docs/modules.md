@@ -563,7 +563,7 @@ Fields:
   - Supports Pango markup.
   - Placeholder values are markup-escaped before insertion.
   - Default: `{percent}% {icon}`
-- `interval_secs` / `interval` (optional): polling interval in seconds.
+- `interval_secs` / `interval` (optional): safety resync interval in seconds.
   - Default: `2`
   - Minimum: `1` (values below are clamped)
 - `device` (optional): preferred backlight device in `/sys/class/backlight` (for example `intel_backlight`).
@@ -595,9 +595,11 @@ Format placeholders:
 Behavior:
 
 - Reads Linux backlight data from `/sys/class/backlight/*`.
-- Uses `udev` backlight events for near-immediate updates, with periodic polling resync (`interval_secs`) as fallback/safety.
+- Uses `udev` backlight events as primary update trigger with immediate GTK main-thread dispatch.
+- Keeps `interval_secs` as a coarse periodic resync fallback/safety path (not the primary update cadence).
 - Uses `actual_brightness` when present, otherwise `brightness`.
 - By default, scroll up/down adjusts brightness via logind DBus `SetBrightness`.
+- Maintains cached backlight device state and selected-device snapshot (`device` preference first, otherwise largest `max_brightness`).
 - Hides the module when the chosen device reports `bl_power != 0`.
 - Adds brightness-state CSS class on each update:
   - `brightness-low` for `< 34%`

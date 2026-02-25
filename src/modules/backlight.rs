@@ -2,10 +2,9 @@ use std::fs;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Command;
-use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
 
-use glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{EventControllerScroll, EventControllerScrollFlags, Label, Widget};
 use serde::Deserialize;
@@ -24,7 +23,7 @@ const DEFAULT_BACKLIGHT_INTERVAL_SECS: u32 = 2;
 const DEFAULT_SCROLL_STEP: f64 = 1.0;
 const DEFAULT_MIN_BRIGHTNESS: f64 = 0.0;
 const DEFAULT_BACKLIGHT_FORMAT: &str = "{percent}% {icon}";
-const UI_DRAIN_INTERVAL_MILLIS: u64 = 200;
+const BACKEND_WAKE_POLL_MILLIS: u64 = 50;
 const BACKLIGHT_LEVEL_CLASSES: [&str; 4] = [
     "brightness-low",
     "brightness-medium",
@@ -87,6 +86,17 @@ enum BacklightControlMessage {
         step_percent: f64,
         min_percent: f64,
     },
+}
+
+struct BacklightBackend {
+    preferred_device: Option<String>,
+    devices: Vec<BacklightDevice>,
+    selected: Option<BacklightSnapshot>,
+    last_error: Option<String>,
+}
+
+struct UdevMonitor {
+    monitor: udev::MonitorSocket,
 }
 
 pub(crate) struct BacklightFactory;
@@ -178,6 +188,28 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
         );
     }
 
+    let main_context = glib::MainContext::default();
+    let label_weak = glib::SendWeakRef::from(label.downgrade());
+
+    let (control_tx, control_rx) = mpsc::channel::<BacklightControlMessage>();
+
+    std::thread::spawn({
+        let format = format.clone();
+        let preferred_device = preferred_device.clone();
+        let format_icons = format_icons.clone();
+        move || {
+            run_backlight_backend_loop(
+                main_context,
+                label_weak,
+                control_rx,
+                format,
+                preferred_device,
+                format_icons,
+                effective_interval_secs,
+            );
+        }
+    });
+
     let scroll_step = normalized_scroll_step(scroll_step);
     if scroll_step > 0.0 || on_scroll_up.is_some() || on_scroll_down.is_some() {
         let scroll = EventControllerScroll::new(
@@ -185,8 +217,8 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
         );
 
         if on_scroll_up.is_some() || on_scroll_down.is_some() {
-            let up_command = on_scroll_up.clone();
-            let down_command = on_scroll_down.clone();
+            let up_command = on_scroll_up;
+            let down_command = on_scroll_down;
             scroll.connect_scroll(move |_, _, dy| {
                 if dy < 0.0 {
                     if let Some(command) = up_command.as_ref() {
@@ -203,9 +235,7 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
                 glib::Propagation::Proceed
             });
         } else if scroll_step > 0.0 {
-            let (control_tx, control_rx) = std::sync::mpsc::channel::<BacklightControlMessage>();
             let clamped_min_brightness = min_brightness.clamp(0.0, 100.0);
-
             scroll.connect_scroll(move |_, _, dy| {
                 if dy < 0.0 {
                     let _ = control_tx.send(BacklightControlMessage::AdjustByPercent {
@@ -225,104 +255,223 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
                 }
                 glib::Propagation::Proceed
             });
-
-            let (sender, receiver) = std::sync::mpsc::channel::<BacklightUiUpdate>();
-            std::thread::spawn(move || {
-                let _ = sender.send(build_backlight_ui_update(
-                    &format,
-                    preferred_device.as_deref(),
-                    &format_icons,
-                ));
-
-                spawn_udev_listener(
-                    sender.clone(),
-                    format.clone(),
-                    preferred_device.clone(),
-                    format_icons.clone(),
-                );
-
-                loop {
-                    while let Ok(message) = control_rx.try_recv() {
-                        let _ =
-                            apply_backlight_control_message(preferred_device.as_deref(), message);
-                        let _ = sender.send(build_backlight_ui_update(
-                            &format,
-                            preferred_device.as_deref(),
-                            &format_icons,
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
-                    let _ = sender.send(build_backlight_ui_update(
-                        &format,
-                        preferred_device.as_deref(),
-                        &format_icons,
-                    ));
-                }
-            });
-
-            glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
-                let label = label.clone();
-                move || {
-                    while let Ok(update) = receiver.try_recv() {
-                        label.set_markup(&update.text);
-                        label.set_visible(update.visible);
-                        for class_name in BACKLIGHT_LEVEL_CLASSES {
-                            label.remove_css_class(class_name);
-                        }
-                        label.add_css_class(update.level_class);
-                    }
-                    ControlFlow::Continue
-                }
-            });
-
-            label.add_controller(scroll);
-            return label;
         }
 
         label.add_controller(scroll);
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<BacklightUiUpdate>();
-    std::thread::spawn(move || {
-        let _ = sender.send(build_backlight_ui_update(
-            &format,
-            preferred_device.as_deref(),
-            &format_icons,
-        ));
-
-        spawn_udev_listener(
-            sender.clone(),
-            format.clone(),
-            preferred_device.clone(),
-            format_icons.clone(),
-        );
-
-        loop {
-            std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
-            let _ = sender.send(build_backlight_ui_update(
-                &format,
-                preferred_device.as_deref(),
-                &format_icons,
-            ));
-        }
-    });
-
-    glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
-        let label = label.clone();
-        move || {
-            while let Ok(update) = receiver.try_recv() {
-                label.set_markup(&update.text);
-                label.set_visible(update.visible);
-                for class_name in BACKLIGHT_LEVEL_CLASSES {
-                    label.remove_css_class(class_name);
-                }
-                label.add_css_class(update.level_class);
-            }
-            ControlFlow::Continue
-        }
-    });
-
     label
+}
+
+fn apply_backlight_ui_update(label: &Label, update: &BacklightUiUpdate) {
+    label.set_markup(&update.text);
+    label.set_visible(update.visible);
+    for class_name in BACKLIGHT_LEVEL_CLASSES {
+        label.remove_css_class(class_name);
+    }
+    label.add_css_class(update.level_class);
+}
+
+fn run_backlight_backend_loop(
+    main_context: glib::MainContext,
+    label_weak: glib::SendWeakRef<Label>,
+    control_rx: Receiver<BacklightControlMessage>,
+    format: String,
+    preferred_device: Option<String>,
+    format_icons: Vec<String>,
+    interval_secs: u32,
+) {
+    let resync_interval = Duration::from_secs(u64::from(interval_secs));
+    let mut last_resync = Instant::now();
+    let mut backend = BacklightBackend::new(preferred_device);
+    let mut udev_monitor = match UdevMonitor::new() {
+        Ok(monitor) => Some(monitor),
+        Err(err) => {
+            eprintln!("backlight udev listener unavailable, using polling only: {err}");
+            None
+        }
+    };
+
+    backend.refresh_from_sysfs();
+    dispatch_backlight_ui_update(
+        &main_context,
+        &label_weak,
+        backend.build_ui_update(&format, &format_icons),
+    );
+
+    loop {
+        while let Ok(message) = control_rx.try_recv() {
+            if let Err(err) = backend.apply_control_message(message) {
+                backend.last_error = Some(err);
+            }
+            backend.refresh_from_sysfs();
+            dispatch_backlight_ui_update(
+                &main_context,
+                &label_weak,
+                backend.build_ui_update(&format, &format_icons),
+            );
+        }
+
+        let wake_timeout =
+            millis_until_next_resync(last_resync, resync_interval).min(BACKEND_WAKE_POLL_MILLIS);
+
+        if let Some(monitor) = udev_monitor.as_mut() {
+            match wait_for_readable_fd(monitor.fd(), wake_timeout) {
+                Ok(true) => {
+                    if monitor.drain_events() {
+                        backend.refresh_from_sysfs();
+                        dispatch_backlight_ui_update(
+                            &main_context,
+                            &label_weak,
+                            backend.build_ui_update(&format, &format_icons),
+                        );
+                    }
+                }
+                Ok(false) => {}
+                Err(err) => {
+                    eprintln!("backlight udev wait failed, listener stopped: {err}");
+                    udev_monitor = None;
+                }
+            }
+        } else {
+            std::thread::sleep(Duration::from_millis(wake_timeout.max(1)));
+        }
+
+        if last_resync.elapsed() >= resync_interval {
+            backend.refresh_from_sysfs();
+            dispatch_backlight_ui_update(
+                &main_context,
+                &label_weak,
+                backend.build_ui_update(&format, &format_icons),
+            );
+            last_resync = Instant::now();
+        }
+    }
+}
+
+fn dispatch_backlight_ui_update(
+    main_context: &glib::MainContext,
+    label_weak: &glib::SendWeakRef<Label>,
+    update: BacklightUiUpdate,
+) {
+    let label_weak = label_weak.clone();
+    std::mem::drop(main_context.spawn(async move {
+        if let Some(label) = label_weak.upgrade() {
+            apply_backlight_ui_update(&label, &update);
+        }
+    }));
+}
+
+fn millis_until_next_resync(last_resync: Instant, interval: Duration) -> u64 {
+    let elapsed = last_resync.elapsed();
+    if elapsed >= interval {
+        return 0;
+    }
+
+    interval
+        .saturating_sub(elapsed)
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+impl BacklightBackend {
+    fn new(preferred_device: Option<String>) -> Self {
+        Self {
+            preferred_device,
+            devices: Vec::new(),
+            selected: None,
+            last_error: None,
+        }
+    }
+
+    fn refresh_from_sysfs(&mut self) {
+        match read_backlight_devices() {
+            Ok(devices) => {
+                self.devices = devices;
+                let selected = select_best_device(&self.devices, self.preferred_device.as_deref())
+                    .cloned()
+                    .map(snapshot_from_device);
+                self.selected = selected;
+                self.last_error = if self.selected.is_some() {
+                    None
+                } else {
+                    Some("no backlight devices found".to_string())
+                };
+            }
+            Err(err) => {
+                self.last_error = Some(err);
+                self.selected = None;
+            }
+        }
+    }
+
+    fn apply_control_message(&self, message: BacklightControlMessage) -> Result<(), String> {
+        match message {
+            BacklightControlMessage::AdjustByPercent {
+                increase,
+                step_percent,
+                min_percent,
+            } => {
+                let device = self
+                    .selected
+                    .as_ref()
+                    .map(|snapshot| snapshot.device.clone())
+                    .ok_or_else(|| "no backlight devices found".to_string())?;
+                set_backlight_by_percent_delta_for_device(
+                    &device,
+                    increase,
+                    step_percent,
+                    min_percent,
+                )
+            }
+        }
+    }
+
+    fn build_ui_update(&self, format: &str, format_icons: &[String]) -> BacklightUiUpdate {
+        if let Some(snapshot) = self.selected.as_ref() {
+            return BacklightUiUpdate {
+                text: render_format(format, snapshot, format_icons),
+                visible: snapshot.device.powered,
+                level_class: brightness_css_class(snapshot.percent),
+            };
+        }
+
+        let error = self
+            .last_error
+            .as_deref()
+            .unwrap_or("no backlight devices found");
+
+        BacklightUiUpdate {
+            text: escape_markup_text(&format!("backlight error: {error}")),
+            visible: true,
+            level_class: "brightness-unknown",
+        }
+    }
+}
+
+impl UdevMonitor {
+    fn new() -> Result<Self, String> {
+        let builder = udev::MonitorBuilder::new().map_err(|err| err.to_string())?;
+        let builder = builder
+            .match_subsystem("backlight")
+            .map_err(|err| err.to_string())?;
+        let monitor = builder.listen().map_err(|err| err.to_string())?;
+
+        Ok(Self { monitor })
+    }
+
+    fn fd(&self) -> i32 {
+        self.monitor.as_raw_fd()
+    }
+
+    fn drain_events(&mut self) -> bool {
+        let mut had_event = false;
+        for _ in self.monitor.iter() {
+            had_event = true;
+        }
+        had_event
+    }
 }
 
 fn spawn_shell_command(command: &str) {
@@ -340,30 +489,12 @@ fn normalized_scroll_step(step: f64) -> f64 {
     }
 }
 
-fn apply_backlight_control_message(
-    preferred_device: Option<&str>,
-    message: BacklightControlMessage,
-) -> Result<(), String> {
-    match message {
-        BacklightControlMessage::AdjustByPercent {
-            increase,
-            step_percent,
-            min_percent,
-        } => set_backlight_by_percent_delta(preferred_device, increase, step_percent, min_percent),
-    }
-}
-
-fn set_backlight_by_percent_delta(
-    preferred_device: Option<&str>,
+fn set_backlight_by_percent_delta_for_device(
+    device: &BacklightDevice,
     increase: bool,
     step_percent: f64,
     min_percent: f64,
 ) -> Result<(), String> {
-    let devices = read_backlight_devices()?;
-    let Some(device) = select_best_device(&devices, preferred_device) else {
-        return Err("no backlight devices found".to_string());
-    };
-
     let max = device.max_brightness;
     if max == 0 {
         return Err("backlight max_brightness is 0".to_string());
@@ -381,6 +512,7 @@ fn set_backlight_by_percent_delta(
     } else {
         current.saturating_sub(step_abs)
     };
+
     if !increase && current <= min_abs {
         return Ok(());
     }
@@ -422,79 +554,27 @@ fn set_brightness_via_logind(device_name: &str, brightness: u32) -> Result<(), S
     Err("failed to set brightness via login1 SetBrightness".to_string())
 }
 
-fn spawn_udev_listener(
-    sender: Sender<BacklightUiUpdate>,
-    format: String,
-    preferred_device: Option<String>,
-    format_icons: Vec<String>,
-) {
-    std::thread::spawn(move || {
-        let builder = match udev::MonitorBuilder::new() {
-            Ok(builder) => builder,
-            Err(err) => {
-                eprintln!("backlight udev listener unavailable, using polling only: {err}");
-                return;
-            }
-        };
-        let builder = match builder.match_subsystem("backlight") {
-            Ok(builder) => builder,
-            Err(err) => {
-                eprintln!("backlight udev subsystem filter failed, using polling only: {err}");
-                return;
-            }
-        };
-        let monitor = match builder.listen() {
-            Ok(monitor) => monitor,
-            Err(err) => {
-                eprintln!("backlight udev listen failed, using polling only: {err}");
-                return;
-            }
-        };
-
-        let monitor_fd = monitor.as_raw_fd();
-        loop {
-            match wait_for_readable_fd(monitor_fd) {
-                Ok(()) => {
-                    let mut had_event = false;
-                    for _event in monitor.iter() {
-                        had_event = true;
-                        let _ = sender.send(build_backlight_ui_update(
-                            &format,
-                            preferred_device.as_deref(),
-                            &format_icons,
-                        ));
-                    }
-                    if !had_event {
-                        std::thread::sleep(Duration::from_millis(20));
-                    }
-                }
-                Err(err) => {
-                    eprintln!("backlight udev wait failed, listener stopped: {err}");
-                    return;
-                }
-            }
-        }
-    });
-}
-
-fn wait_for_readable_fd(fd: i32) -> Result<(), String> {
+fn wait_for_readable_fd(fd: i32, timeout_millis: u64) -> Result<bool, String> {
     let mut pollfd = libc::pollfd {
         fd,
         events: libc::POLLIN,
         revents: 0,
     };
 
+    let timeout_millis = timeout_millis.min(i32::MAX as u64) as i32;
+
     loop {
         // SAFETY: we pass a valid pointer to one pollfd entry and a correct count.
-        let rc = unsafe { libc::poll(&mut pollfd, 1, -1) };
+        let rc = unsafe { libc::poll(&mut pollfd, 1, timeout_millis) };
         if rc > 0 {
             if (pollfd.revents & libc::POLLIN) != 0 {
-                return Ok(());
+                return Ok(true);
             }
             return Err(format!("unexpected poll events: {}", pollfd.revents));
         }
+
         if rc == 0 {
-            continue;
+            return Ok(false);
         }
 
         let err = std::io::Error::last_os_error();
@@ -505,40 +585,14 @@ fn wait_for_readable_fd(fd: i32) -> Result<(), String> {
     }
 }
 
-fn build_backlight_ui_update(
-    format: &str,
-    preferred_device: Option<&str>,
-    format_icons: &[String],
-) -> BacklightUiUpdate {
-    match read_backlight_snapshot(preferred_device) {
-        Ok(snapshot) => BacklightUiUpdate {
-            text: render_format(format, &snapshot, format_icons),
-            visible: snapshot.device.powered,
-            level_class: brightness_css_class(snapshot.percent),
-        },
-        Err(err) => BacklightUiUpdate {
-            text: escape_markup_text(&format!("backlight error: {err}")),
-            visible: true,
-            level_class: "brightness-unknown",
-        },
-    }
-}
-
-fn read_backlight_snapshot(preferred_device: Option<&str>) -> Result<BacklightSnapshot, String> {
-    let devices = read_backlight_devices()?;
-    let best = select_best_device(&devices, preferred_device)
-        .ok_or_else(|| "no backlight devices found".to_string())?;
-
-    let percent = if best.max_brightness == 0 {
+fn snapshot_from_device(device: BacklightDevice) -> BacklightSnapshot {
+    let percent = if device.max_brightness == 0 {
         100
     } else {
-        ((best.actual_brightness.saturating_mul(100)) / best.max_brightness).min(100) as u16
+        ((device.actual_brightness.saturating_mul(100)) / device.max_brightness).min(100) as u16
     };
 
-    Ok(BacklightSnapshot {
-        device: best.clone(),
-        percent,
-    })
+    BacklightSnapshot { device, percent }
 }
 
 fn read_backlight_devices() -> Result<Vec<BacklightDevice>, String> {

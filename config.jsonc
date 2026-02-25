@@ -61,6 +61,8 @@
         "type": "backlight",
         "class": "v-square",
         "format": "{percent}% {icon}",
+        // Optional coarse safety resync cadence; normal updates are event-driven via udev.
+        "interval_secs": 2,
         "scroll-step": 1.0,
         "min-brightness": 1.0,
         // Optional explicit device; if omitted, picks the device with largest max_brightness.
