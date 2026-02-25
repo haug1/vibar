@@ -29,13 +29,6 @@ install_arch() {
 install_debian() {
   ${SUDO} apt update
 
-  if ! apt-cache show libgtk4-layer-shell-dev >/dev/null 2>&1; then
-    echo "Missing package: libgtk4-layer-shell-dev" >&2
-    echo "This distro release does not provide GTK4 layer-shell development headers." >&2
-    echo "Use Ubuntu 24.04+ (or Debian testing/unstable), Fedora, or Arch for now." >&2
-    exit 1
-  fi
-
   ${SUDO} apt install -y \
     build-essential \
     pkg-config \
