@@ -32,15 +32,7 @@ jobs:
           if ! grep -q '^keepcache=True' /etc/dnf/dnf.conf; then
             echo 'keepcache=True' >> /etc/dnf/dnf.conf
           fi
-          dnf install -y \
-            make \
-            gcc \
-            pkgconf-pkg-config \
-            gtk4-devel \
-            gtk4-layer-shell-devel \
-            wayland-devel \
-            wayland-protocols-devel \
-            rustup
+          ./scripts/install-deps.sh
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -18,6 +18,7 @@ install_arch() {
   ${SUDO} pacman -Sy --needed \
     base-devel \
     pkgconf \
+    systemd \
     gtk4 \
     gtk4-layer-shell \
     wayland \
@@ -26,11 +27,19 @@ install_arch() {
 }
 
 install_debian() {
-  # No idea if this works
   ${SUDO} apt update
+
+  if ! apt-cache show libgtk4-layer-shell-dev >/dev/null 2>&1; then
+    echo "Missing package: libgtk4-layer-shell-dev" >&2
+    echo "This distro release does not provide GTK4 layer-shell development headers." >&2
+    echo "Use Ubuntu 24.04+ (or Debian testing/unstable), Fedora, or Arch for now." >&2
+    exit 1
+  fi
+
   ${SUDO} apt install -y \
     build-essential \
     pkg-config \
+    libudev-dev \
     libgtk-4-dev \
     libgtk4-layer-shell-dev \
     libwayland-dev \
@@ -42,6 +51,19 @@ install_debian() {
   fi
 }
 
+install_fedora() {
+  ${SUDO} dnf install -y \
+    make \
+    gcc \
+    pkgconf-pkg-config \
+    systemd-devel \
+    gtk4-devel \
+    gtk4-layer-shell-devel \
+    wayland-devel \
+    wayland-protocols-devel \
+    rustup
+}
+
 case "${ID:-}" in
   arch|cachyos|endeavouros|manjaro)
     install_arch
@@ -49,9 +71,14 @@ case "${ID:-}" in
   ubuntu|debian|linuxmint|pop)
     install_debian
     ;;
+  fedora|rhel|centos)
+    install_fedora
+    ;;
   *)
     if [[ "${ID_LIKE:-}" == *"arch"* ]]; then
       install_arch
+    elif [[ "${ID_LIKE:-}" == *"fedora"* ]] || [[ "${ID_LIKE:-}" == *"rhel"* ]]; then
+      install_fedora
     elif [[ "${ID_LIKE:-}" == *"debian"* ]]; then
       install_debian
     else

@@ -9,6 +9,8 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Current status: project passes CI (`make ci`)
 - Primary runtime target: sway/Wayland
 - CI build environment: GitHub Actions Ubuntu runner with Fedora 41 container for consistent GTK4 layer-shell dev packages
+- CI system package setup is sourced from `scripts/install-deps.sh` (Fedora path) to keep local/CI dependency definitions aligned
+- `scripts/install-deps.sh` Debian path now checks for `libgtk4-layer-shell-dev` and exits with explicit guidance when unavailable (for example Debian 12/bookworm)
 
 ## Core Behavior
 

@@ -59,3 +59,4 @@ This document contains implementation-facing details that are intentionally kept
 - Keep lockfile-based builds (`--locked`) for reproducibility.
 - Keep `README.md` concise and point to expanded docs in `docs/`.
 - For modules with shell click actions, use `modules::attach_primary_click_command(...)` so click handler wiring and `.clickable` class behavior stay consistent.
+- Keep OS package requirements centralized in `scripts/install-deps.sh`; CI installs system dependencies via that script to avoid drift.

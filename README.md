@@ -15,6 +15,8 @@ Install OS dependencies and Rust toolchain:
 make deps
 ```
 
+Note: Debian 12 (bookworm) does not ship `libgtk4-layer-shell-dev`, so `make deps` will fail there. Use Ubuntu 24.04+, Debian testing/unstable, Fedora, or Arch.
+
 Generate a lockfile (commit it):
 
 ```bash
