@@ -794,6 +794,9 @@ Behavior:
 
 - StatusNotifier-based tray.
 - If no external `org.kde.StatusNotifierWatcher` is available, vibar starts an in-process watcher fallback.
+- Fallback watcher prunes registered items when DBus owners vanish (`NameOwnerChanged`), so exited apps are removed.
+- Tray items with SNI `Status=Passive` are hidden.
+- Tray refresh is event-driven from DBus owner-change events, with `poll_interval_secs` kept as coarse fallback resync.
 - Left click triggers SNI `Activate`.
 - Right click requests SNI menu and renders DBusMenu in GTK popover.
 - Middle click triggers SNI `SecondaryActivate`.

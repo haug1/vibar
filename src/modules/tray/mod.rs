@@ -1,5 +1,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
 use std::time::Duration;
 
@@ -69,10 +71,15 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
     let poll_interval_secs = normalized_poll_interval_secs(config.poll_interval_secs);
 
     let (sender, receiver) = std::sync::mpsc::channel::<Vec<TrayItemSnapshot>>();
+    let (refresh_tx, refresh_rx) = mpsc::channel::<()>();
 
     thread::spawn(move || {
+        sni::start_name_owner_listener(refresh_tx);
+
         let mut last = Vec::<TrayItemSnapshot>::new();
-        loop {
+        while let Ok(_) | Err(RecvTimeoutError::Timeout) =
+            refresh_rx.recv_timeout(Duration::from_secs(u64::from(poll_interval_secs)))
+        {
             let snapshot = sni::fetch_tray_snapshot();
             if snapshot != last {
                 if sender.send(snapshot.clone()).is_err() {
@@ -80,7 +87,6 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
                 }
                 last = snapshot;
             }
-            thread::sleep(Duration::from_secs(u64::from(poll_interval_secs)));
         }
     });
 

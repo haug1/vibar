@@ -3,6 +3,7 @@ use std::thread;
 use std::time::Duration;
 
 use zbus::blocking::connection::Builder as ConnectionBuilder;
+use zbus::blocking::fdo::DBusProxy;
 use zbus::blocking::{Connection, Proxy};
 use zbus::message::Header;
 use zbus::Error as ZbusError;
@@ -16,6 +17,7 @@ use super::types::{
 #[derive(Debug, Default)]
 struct WatcherState {
     registered_items: Vec<String>,
+    host_registered: bool,
 }
 
 #[derive(Clone)]
@@ -56,8 +58,14 @@ impl LocalStatusNotifierWatcher {
     }
 
     fn register_status_notifier_host(&self, service: &str) {
-        if tray_debug_enabled() {
-            eprintln!("vibar/tray: local watcher host registration: service={service:?}");
+        let Ok(mut guard) = self.state.lock() else {
+            return;
+        };
+        if !guard.host_registered {
+            guard.host_registered = true;
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: local watcher host registration: service={service:?}");
+            }
         }
     }
 
@@ -164,6 +172,41 @@ fn call_item_methods_with_fallback(
                 "vibar/tray: no supported click methods for {destination}{path} tried={}",
                 methods.join(",")
             );
+        }
+    });
+}
+
+pub(super) fn start_name_owner_listener(trigger_tx: std::sync::mpsc::Sender<()>) {
+    thread::spawn(move || {
+        let Ok(connection) = Connection::session() else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: failed to open session bus for NameOwnerChanged listener");
+            }
+            return;
+        };
+        let Ok(proxy) = DBusProxy::new(&connection) else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: failed to create DBus proxy for NameOwnerChanged listener");
+            }
+            return;
+        };
+        let Ok(mut signals) = proxy.receive_name_owner_changed() else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: failed to subscribe to NameOwnerChanged");
+            }
+            return;
+        };
+
+        for signal in &mut signals {
+            let Ok(args) = signal.args() else {
+                continue;
+            };
+            let name = args.name().to_string();
+            // Refresh on likely tray-relevant owner changes, while avoiding full refresh for every bus event.
+            if name.starts_with(':') || name.contains("StatusNotifier") || name.contains("ayatana")
+            {
+                let _ = trigger_tx.send(());
+            }
         }
     });
 }
@@ -285,6 +328,17 @@ fn fetch_item(
             }
         };
 
+        let status = proxy
+            .get_property::<String>("Status")
+            .ok()
+            .unwrap_or_else(|| "Active".to_string());
+        if status.eq_ignore_ascii_case("passive") {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: skipping passive tray item {destination}{path} ({id})");
+            }
+            return None;
+        }
+
         let icon_name_value = proxy
             .get_property::<String>("IconName")
             .ok()
@@ -364,8 +418,10 @@ fn tray_debug_enabled() -> bool {
 
 fn ensure_local_watcher_fallback() {
     let _ = LOCAL_WATCHER_INIT.get_or_init(|| {
+        let state = Arc::new(Mutex::new(WatcherState::default()));
+        spawn_owner_cleanup_listener(state.clone());
+
         thread::spawn(move || {
-            let state = Arc::new(Mutex::new(WatcherState::default()));
             let watcher = LocalStatusNotifierWatcher { state };
 
             let connection = match ConnectionBuilder::session()
@@ -393,6 +449,62 @@ fn ensure_local_watcher_fallback() {
             }
         });
     });
+}
+
+fn spawn_owner_cleanup_listener(state: Arc<Mutex<WatcherState>>) {
+    thread::spawn(move || {
+        let Ok(connection) = Connection::session() else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: local watcher cleanup listener failed to open session bus");
+            }
+            return;
+        };
+        let Ok(proxy) = DBusProxy::new(&connection) else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: local watcher cleanup listener failed to create DBusProxy");
+            }
+            return;
+        };
+        let Ok(mut signals) = proxy.receive_name_owner_changed() else {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: local watcher cleanup listener failed to subscribe NameOwnerChanged");
+            }
+            return;
+        };
+
+        for signal in &mut signals {
+            let Ok(args) = signal.args() else {
+                continue;
+            };
+            let name = args.name().to_string();
+            if args.new_owner().is_some() {
+                continue;
+            }
+
+            let Ok(mut guard) = state.lock() else {
+                continue;
+            };
+            let removed = remove_registered_items_for_name(&mut guard.registered_items, &name);
+            if removed > 0 && tray_debug_enabled() {
+                eprintln!(
+                    "vibar/tray: local watcher pruned {removed} item(s) after owner vanished: {name}"
+                );
+            }
+        }
+    });
+}
+
+fn remove_registered_items_for_name(items: &mut Vec<String>, name: &str) -> usize {
+    let before = items.len();
+    items.retain(|item| !is_item_owned_by_name(item, name));
+    before.saturating_sub(items.len())
+}
+
+fn is_item_owned_by_name(item: &str, name: &str) -> bool {
+    item == name
+        || item
+            .strip_prefix(name)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
 fn normalize_registered_item_id(service: &str, sender: Option<&str>) -> Option<String> {
@@ -423,7 +535,10 @@ fn is_method_missing_error(err: &ZbusError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_registered_item_id, parse_item_address, select_icon_pixmap};
+    use super::{
+        is_item_owned_by_name, normalize_registered_item_id, parse_item_address,
+        remove_registered_items_for_name, select_icon_pixmap,
+    };
 
     #[test]
     fn select_icon_pixmap_picks_largest_valid_entry() {
@@ -464,5 +579,29 @@ mod tests {
         let id = normalize_registered_item_id("org.example.Tray", None)
             .expect("service-only entry should normalize");
         assert_eq!(id, "org.example.Tray/StatusNotifierItem");
+    }
+
+    #[test]
+    fn remove_registered_items_for_name_drops_matching_owner_entries() {
+        let mut items = vec![
+            ":1.42/StatusNotifierItem".to_string(),
+            ":1.43/org/example/Item".to_string(),
+            "org.example.Service/StatusNotifierItem".to_string(),
+        ];
+        let removed = remove_registered_items_for_name(&mut items, ":1.42");
+        assert_eq!(removed, 1);
+        assert_eq!(
+            items,
+            vec![
+                ":1.43/org/example/Item".to_string(),
+                "org.example.Service/StatusNotifierItem".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn is_item_owned_by_name_checks_boundary() {
+        assert!(is_item_owned_by_name(":1.5/StatusNotifierItem", ":1.5"));
+        assert!(!is_item_owned_by_name(":1.50/StatusNotifierItem", ":1.5"));
     }
 }

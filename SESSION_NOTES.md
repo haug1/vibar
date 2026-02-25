@@ -38,6 +38,9 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `pulseaudio` supports optional popup controls (`controls.enabled`) for default sink mute/volume, active sink-input streams (per-app mute/volume), output-device switching (default sink selection), and per-device output port switching; also supports optional `right-click`/`on-right-click` command binding (ignored when `controls.open=right-click`)
 - `tray` accepts StatusNotifier watcher item entries with either explicit `service/path` addresses or service-only names (service-only falls back to `/StatusNotifierItem`)
 - When no external StatusNotifier watcher exists, `tray` starts an in-process watcher fallback and treats host registration as available (`IsStatusNotifierHostRegistered=true`)
+- Local watcher fallback prunes tray item IDs on DBus `NameOwnerChanged` owner-loss events to prevent lingering stale icons after app exit
+- `tray` hides items that report SNI `Status=Passive` (helps avoid stale/missing icons after item exit)
+- `tray` snapshot refresh is event-driven via DBus `NameOwnerChanged`, with `poll_interval_secs` retained as coarse fallback resync
 - Config lookup order: `~/.config/vibar/config.jsonc`, then embedded `config.jsonc` in binary
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
