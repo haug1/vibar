@@ -392,6 +392,7 @@ Fields:
 Behavior:
 
 - Shows command output in a label.
+- Label text is left-aligned within the module widget.
 - If stdout is empty, stderr is used as fallback text.
 - Module auto-hides when parsed output text is empty.
 - Output parsing is Waybar-compatible:

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{Label, Widget};
+use gtk::{Align, Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -91,6 +91,8 @@ pub(crate) fn build_exec_module(
     class: Option<String>,
 ) -> Label {
     let label = Label::new(None);
+    label.set_halign(Align::Start);
+    label.set_xalign(0.0);
     label.add_css_class("module");
     label.add_css_class("exec");
     let effective_interval_secs = normalized_exec_interval(interval_secs);
