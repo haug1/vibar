@@ -684,6 +684,10 @@ Schema:
     "hifi": "",
     "default": ["", "", ""]
   },
+  "controls": {
+    "enabled": true,
+    "open": "right-click"
+  },
   "click": "pavucontrol",
   "class": "optional-css-classes"
 }
@@ -722,6 +726,12 @@ Fields:
   - Supported keys: `headphone`, `speaker`, `hdmi`, `headset`, `hands-free`, `portable`, `car`, `hifi`, `phone`, `default`
   - `default` is an array of volume-level icons.
   - Default: `["", "", ""]`
+- `controls` (optional): popup audio controls attached to the module.
+  - `enabled` (optional): enable the popup.
+    - Default: `false`
+  - `open` (optional): click gesture that toggles popup visibility.
+    - Supported values: `left-click`, `right-click`
+    - Default: `right-click`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click`.
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
@@ -736,11 +746,18 @@ Behavior:
 
 - Uses native `libpulse` subscription callbacks for near-immediate updates.
 - On each relevant audio event, reads default sink volume/mute and default source mute state via PulseAudio introspection.
+- Subscribes to sink-input events so active app stream controls stay in sync while streams start/stop.
 - Detects device icon category from sink `active_port.name + device form factor` using Waybar-style priority matching.
   - Match order: `headphone`, `speaker`, `hdmi`, `headset`, `hands-free`, `portable`, `car`, `hifi`, `phone`
 - Scroll up/down adjusts default sink volume by `scroll-step`.
+- With `controls.enabled=true`, popup includes:
+  - default sink mute toggle + volume slider
+  - per-stream mute toggles + volume sliders for active playback streams
+  - output-port buttons for the current default sink
+- If `controls.open=left-click`, module `click` command is ignored.
 
 Styling:
 
 - Label classes: `.module.pulseaudio`
+- Popup classes: `.pulseaudio-controls-popover`, `.pulseaudio-controls-content`, `.pulseaudio-controls-sink-row`, `.pulseaudio-controls-ports`, `.pulseaudio-controls-inputs`, `.pulseaudio-controls-input-row`, `.pulseaudio-controls-input-name`, `.pulseaudio-control-button`, `.pulseaudio-volume-scale`, `.pulseaudio-controls-empty`
 - Optional extra class via `class` field.

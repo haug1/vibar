@@ -5,10 +5,13 @@ use std::time::Duration;
 
 use glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{EventControllerScroll, EventControllerScrollFlags, Label, Widget};
+use gtk::{
+    Box as GtkBox, Button, EventControllerScroll, EventControllerScrollFlags, GestureClick, Label,
+    Orientation, Popover, PositionType, Scale, Widget,
+};
 use libpulse_binding as pulse;
 use pulse::callbacks::ListResult;
-use pulse::context::introspect::{ServerInfo, SinkInfo};
+use pulse::context::introspect::{ServerInfo, SinkInfo, SinkInputInfo};
 use pulse::context::subscribe::{Facility, InterestMaskSet};
 use pulse::context::{Context, FlagSet as ContextFlagSet, State as ContextState};
 use pulse::mainloop::standard::{IterateResult, Mainloop};
@@ -35,15 +38,18 @@ const DEFAULT_FORMAT_BLUETOOTH_MUTED: &str = " {icon} {format_source}";
 const DEFAULT_FORMAT_MUTED: &str = " {format_source}";
 const DEFAULT_FORMAT_SOURCE: &str = "";
 const DEFAULT_FORMAT_SOURCE_MUTED: &str = "";
+const DEFAULT_CONTROLS_ENABLED: bool = false;
 const ICON_VOLUME_LOW: &str = "";
 const ICON_VOLUME_MEDIUM: &str = "";
 const ICON_VOLUME_HIGH: &str = "";
+const ICON_MUTED: &str = "";
 const ICON_HEADPHONE: &str = "";
 const ICON_HANDS_FREE: &str = "";
 const ICON_HEADSET: &str = "";
 const ICON_PHONE: &str = "";
 const ICON_PORTABLE: &str = "";
 const ICON_CAR: &str = "";
+const CONTROLS_UI_MAX_PERCENT: f64 = 150.0;
 pub(crate) const MODULE_TYPE: &str = "pulseaudio";
 
 #[derive(Debug, Deserialize, Clone)]
@@ -69,7 +75,25 @@ pub(crate) struct PulseAudioConfig {
     #[serde(rename = "on-click", default)]
     pub(crate) on_click: Option<String>,
     #[serde(default)]
+    pub(crate) controls: PulseAudioControlsConfig,
+    #[serde(default)]
     pub(crate) class: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub(crate) struct PulseAudioControlsConfig {
+    #[serde(default = "default_controls_enabled")]
+    pub(crate) enabled: bool,
+    #[serde(default)]
+    pub(crate) open: PulseAudioControlsOpenMode,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum PulseAudioControlsOpenMode {
+    LeftClick,
+    #[default]
+    RightClick,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -106,6 +130,31 @@ struct PulseState {
 }
 
 #[derive(Debug, Clone)]
+struct AudioControlsState {
+    sink_name: String,
+    sink_volume: u32,
+    sink_muted: bool,
+    sink_ports: Vec<SinkPortEntry>,
+    active_sink_port: Option<String>,
+    sink_inputs: Vec<SinkInputEntry>,
+}
+
+#[derive(Debug, Clone)]
+struct SinkPortEntry {
+    name: String,
+    description: String,
+    available: pulse::def::PortAvailable,
+}
+
+#[derive(Debug, Clone)]
+struct SinkInputEntry {
+    index: u32,
+    name: String,
+    volume: u32,
+    muted: bool,
+}
+
+#[derive(Debug, Clone)]
 struct ServerDefaults {
     sink_name: String,
     source_name: Option<String>,
@@ -125,9 +174,29 @@ enum IconKind {
     Default,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum WorkerCommand {
     VolumeStep { increase: bool, step: f64 },
+    SetSinkMute { muted: bool },
+    SetSinkVolumePercent { percent: u32 },
+    SetSinkInputMute { index: u32, muted: bool },
+    SetSinkInputVolumePercent { index: u32, percent: u32 },
+    SetSinkPort { port_name: String },
+}
+
+enum UiUpdate {
+    Label(String),
+    Controls(AudioControlsState),
+}
+
+#[derive(Clone)]
+struct PulseAudioControlsUi {
+    sink_mute_button: Button,
+    sink_volume_scale: Scale,
+    sink_ports_box: GtkBox,
+    sink_inputs_box: GtkBox,
+    suppress_sink_scale_callback: Arc<AtomicBool>,
+    sink_muted_state: Arc<AtomicBool>,
 }
 
 pub(crate) struct PulseAudioFactory;
@@ -148,6 +217,10 @@ impl ModuleFactory for PulseAudioFactory {
 
 fn default_scroll_step() -> f64 {
     DEFAULT_SCROLL_STEP
+}
+
+fn default_controls_enabled() -> bool {
+    DEFAULT_CONTROLS_ENABLED
 }
 
 fn default_volume_icons() -> Vec<String> {
@@ -192,9 +265,21 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
 
     apply_css_classes(&label, config.class.as_deref());
 
-    attach_primary_click_command(&label, click_command);
-
     let (worker_tx, worker_rx) = mpsc::channel::<WorkerCommand>();
+    let controls_ui = if config.controls.enabled {
+        let controls_ui = build_controls_ui(&label, worker_tx.clone(), config.controls.open);
+        if matches!(config.controls.open, PulseAudioControlsOpenMode::LeftClick)
+            && click_command.is_some()
+        {
+            eprintln!("pulseaudio click command is ignored when controls.open=left-click");
+        } else {
+            attach_primary_click_command(&label, click_command);
+        }
+        Some(controls_ui)
+    } else {
+        attach_primary_click_command(&label, click_command);
+        None
+    };
 
     let scroll_step = normalized_scroll_step(config.scroll_step);
     if (scroll_step - config.scroll_step).abs() > f64::EPSILON {
@@ -228,21 +313,245 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
         label.add_controller(scroll);
     }
 
-    let (ui_sender, ui_receiver) = mpsc::channel::<String>();
+    let (ui_sender, ui_receiver) = mpsc::channel::<UiUpdate>();
     let render_config = config.clone();
     std::thread::spawn(move || run_native_loop(ui_sender, worker_rx, render_config));
 
     glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
         let label = label.clone();
+        let controls_ui = controls_ui.clone();
         move || {
-            while let Ok(text) = ui_receiver.try_recv() {
-                label.set_markup(&text);
+            while let Ok(update) = ui_receiver.try_recv() {
+                match update {
+                    UiUpdate::Label(text) => label.set_markup(&text),
+                    UiUpdate::Controls(state) => {
+                        if let Some(controls_ui) = controls_ui.as_ref() {
+                            refresh_controls_ui(controls_ui, &state, worker_tx.clone());
+                        }
+                    }
+                }
             }
             ControlFlow::Continue
         }
     });
 
     label
+}
+
+fn build_controls_ui(
+    label: &Label,
+    worker_tx: mpsc::Sender<WorkerCommand>,
+    open_mode: PulseAudioControlsOpenMode,
+) -> PulseAudioControlsUi {
+    label.add_css_class("clickable");
+    label.add_css_class("pulseaudio-controls-enabled");
+
+    let popover = Popover::new();
+    popover.add_css_class("pulseaudio-controls-popover");
+    popover.set_autohide(true);
+    popover.set_has_arrow(true);
+    popover.set_position(PositionType::Top);
+    popover.set_parent(label);
+
+    let content = GtkBox::new(Orientation::Vertical, 6);
+    content.add_css_class("pulseaudio-controls-content");
+    popover.set_child(Some(&content));
+
+    let sink_row = GtkBox::new(Orientation::Horizontal, 6);
+    sink_row.add_css_class("pulseaudio-controls-sink-row");
+    content.append(&sink_row);
+
+    let sink_mute_button = Button::with_label(ICON_VOLUME_HIGH);
+    sink_mute_button.add_css_class("pulseaudio-control-button");
+    sink_row.append(&sink_mute_button);
+
+    let sink_volume_scale =
+        Scale::with_range(Orientation::Horizontal, 0.0, CONTROLS_UI_MAX_PERCENT, 1.0);
+    sink_volume_scale.add_css_class("pulseaudio-volume-scale");
+    sink_volume_scale.set_hexpand(true);
+    sink_volume_scale.set_draw_value(false);
+    sink_row.append(&sink_volume_scale);
+
+    let ports_box = GtkBox::new(Orientation::Vertical, 4);
+    ports_box.add_css_class("pulseaudio-controls-ports");
+    content.append(&ports_box);
+
+    let inputs_box = GtkBox::new(Orientation::Vertical, 4);
+    inputs_box.add_css_class("pulseaudio-controls-inputs");
+    content.append(&inputs_box);
+
+    install_controls_open_gesture(label, &popover, open_mode);
+
+    let suppress_sink_scale_callback = Arc::new(AtomicBool::new(false));
+    let sink_muted_state = Arc::new(AtomicBool::new(false));
+    {
+        let worker_tx = worker_tx.clone();
+        let suppress = suppress_sink_scale_callback.clone();
+        sink_volume_scale.connect_value_changed(move |scale| {
+            if suppress.load(Ordering::Relaxed) {
+                return;
+            }
+            let _ = worker_tx.send(WorkerCommand::SetSinkVolumePercent {
+                percent: scale.value().round().clamp(0.0, CONTROLS_UI_MAX_PERCENT) as u32,
+            });
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        let sink_muted_state = sink_muted_state.clone();
+        sink_mute_button.connect_clicked(move |_| {
+            let _ = worker_tx.send(WorkerCommand::SetSinkMute {
+                muted: !sink_muted_state.load(Ordering::Relaxed),
+            });
+        });
+    }
+
+    PulseAudioControlsUi {
+        sink_mute_button,
+        sink_volume_scale,
+        sink_ports_box: ports_box,
+        sink_inputs_box: inputs_box,
+        suppress_sink_scale_callback,
+        sink_muted_state,
+    }
+}
+
+fn install_controls_open_gesture(
+    label: &Label,
+    popover: &Popover,
+    open_mode: PulseAudioControlsOpenMode,
+) {
+    let button = match open_mode {
+        PulseAudioControlsOpenMode::LeftClick => 1,
+        PulseAudioControlsOpenMode::RightClick => 3,
+    };
+    let click = GestureClick::builder().button(button).build();
+    let popover = popover.clone();
+    click.connect_pressed(move |_, _, _, _| {
+        if popover.is_visible() {
+            popover.popdown();
+        } else {
+            popover.popup();
+        }
+    });
+    label.add_controller(click);
+}
+
+fn refresh_controls_ui(
+    controls_ui: &PulseAudioControlsUi,
+    state: &AudioControlsState,
+    worker_tx: mpsc::Sender<WorkerCommand>,
+) {
+    controls_ui.sink_mute_button.set_label(if state.sink_muted {
+        ICON_MUTED
+    } else {
+        ICON_VOLUME_HIGH
+    });
+    controls_ui
+        .sink_mute_button
+        .set_tooltip_text(Some(&state.sink_name));
+    controls_ui
+        .sink_muted_state
+        .store(state.sink_muted, Ordering::Relaxed);
+    controls_ui
+        .suppress_sink_scale_callback
+        .store(true, Ordering::Relaxed);
+    controls_ui
+        .sink_volume_scale
+        .set_value((state.sink_volume as f64).min(CONTROLS_UI_MAX_PERCENT));
+    controls_ui
+        .suppress_sink_scale_callback
+        .store(false, Ordering::Relaxed);
+    controls_ui
+        .sink_volume_scale
+        .set_tooltip_text(Some(&format!("Default sink: {}%", state.sink_volume)));
+
+    clear_box_children(&controls_ui.sink_ports_box);
+    if state.sink_ports.is_empty() {
+        let no_ports_label = Label::new(Some("No output ports"));
+        no_ports_label.add_css_class("pulseaudio-controls-empty");
+        no_ports_label.set_xalign(0.0);
+        controls_ui.sink_ports_box.append(&no_ports_label);
+    } else {
+        for port in &state.sink_ports {
+            let button = Button::with_label(&port.description);
+            button.add_css_class("pulseaudio-control-button");
+            if state.active_sink_port.as_deref() == Some(port.name.as_str()) {
+                button.add_css_class("active");
+            }
+            if port.available == pulse::def::PortAvailable::No {
+                button.set_sensitive(false);
+            }
+            let port_name = port.name.clone();
+            let worker_tx = worker_tx.clone();
+            button.connect_clicked(move |_| {
+                let _ = worker_tx.send(WorkerCommand::SetSinkPort {
+                    port_name: port_name.clone(),
+                });
+            });
+            controls_ui.sink_ports_box.append(&button);
+        }
+    }
+
+    clear_box_children(&controls_ui.sink_inputs_box);
+    if state.sink_inputs.is_empty() {
+        let no_streams_label = Label::new(Some("No active playback streams"));
+        no_streams_label.add_css_class("pulseaudio-controls-empty");
+        no_streams_label.set_xalign(0.0);
+        controls_ui.sink_inputs_box.append(&no_streams_label);
+    } else {
+        for input in &state.sink_inputs {
+            let row = GtkBox::new(Orientation::Horizontal, 6);
+            row.add_css_class("pulseaudio-controls-input-row");
+
+            let mute_button = Button::with_label(if input.muted {
+                ICON_MUTED
+            } else {
+                ICON_VOLUME_HIGH
+            });
+            mute_button.add_css_class("pulseaudio-control-button");
+            let worker_tx_for_mute = worker_tx.clone();
+            let index = input.index;
+            let next_mute = !input.muted;
+            mute_button.connect_clicked(move |_| {
+                let _ = worker_tx_for_mute.send(WorkerCommand::SetSinkInputMute {
+                    index,
+                    muted: next_mute,
+                });
+            });
+            row.append(&mute_button);
+
+            let name_label = Label::new(Some(&input.name));
+            name_label.add_css_class("pulseaudio-controls-input-name");
+            name_label.set_hexpand(true);
+            name_label.set_xalign(0.0);
+            row.append(&name_label);
+
+            let scale =
+                Scale::with_range(Orientation::Horizontal, 0.0, CONTROLS_UI_MAX_PERCENT, 1.0);
+            scale.add_css_class("pulseaudio-volume-scale");
+            scale.set_draw_value(false);
+            scale.set_width_request(120);
+            scale.set_value((input.volume as f64).min(CONTROLS_UI_MAX_PERCENT));
+            let worker_tx_for_volume = worker_tx.clone();
+            let index = input.index;
+            scale.connect_value_changed(move |scale| {
+                let _ = worker_tx_for_volume.send(WorkerCommand::SetSinkInputVolumePercent {
+                    index,
+                    percent: scale.value().round().clamp(0.0, CONTROLS_UI_MAX_PERCENT) as u32,
+                });
+            });
+            row.append(&scale);
+
+            controls_ui.sink_inputs_box.append(&row);
+        }
+    }
+}
+
+fn clear_box_children(container: &GtkBox) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
 }
 
 pub(crate) fn normalized_scroll_step(step: f64) -> f64 {
@@ -254,7 +563,7 @@ pub(crate) fn normalized_scroll_step(step: f64) -> f64 {
 }
 
 fn run_native_loop(
-    ui_sender: mpsc::Sender<String>,
+    ui_sender: mpsc::Sender<UiUpdate>,
     worker_rx: Receiver<WorkerCommand>,
     config: PulseAudioConfig,
 ) {
@@ -262,7 +571,9 @@ fn run_native_loop(
         match run_native_session(&ui_sender, &worker_rx, &config) {
             Ok(()) => return,
             Err(err) => {
-                let _ = ui_sender.send(escape_markup_text(&format!("audio error: {err}")));
+                let _ = ui_sender.send(UiUpdate::Label(escape_markup_text(&format!(
+                    "audio error: {err}"
+                ))));
                 std::thread::sleep(Duration::from_secs(SESSION_RECONNECT_DELAY_SECS));
             }
         }
@@ -270,7 +581,7 @@ fn run_native_loop(
 }
 
 fn run_native_session(
-    ui_sender: &mpsc::Sender<String>,
+    ui_sender: &mpsc::Sender<UiUpdate>,
     worker_rx: &Receiver<WorkerCommand>,
     config: &PulseAudioConfig,
 ) -> Result<(), String> {
@@ -305,7 +616,8 @@ fn run_native_session(
         InterestMaskSet::SINK
             | InterestMaskSet::SOURCE
             | InterestMaskSet::SERVER
-            | InterestMaskSet::CARD,
+            | InterestMaskSet::CARD
+            | InterestMaskSet::SINK_INPUT,
         |_| {},
     );
     wait_for_operation(&mut mainloop, &mut subscribe_op)?;
@@ -327,6 +639,38 @@ fn run_native_session(
                     }
                     dirty.store(true, Ordering::SeqCst);
                 }
+                Ok(WorkerCommand::SetSinkMute { muted }) => {
+                    if let Some(defaults) = last_defaults.as_ref() {
+                        let _ = set_sink_mute(&context, &mut mainloop, &defaults.sink_name, muted);
+                    }
+                    dirty.store(true, Ordering::SeqCst);
+                }
+                Ok(WorkerCommand::SetSinkVolumePercent { percent }) => {
+                    if let Some(defaults) = last_defaults.as_ref() {
+                        let _ = set_sink_volume_percent(
+                            &context,
+                            &mut mainloop,
+                            &defaults.sink_name,
+                            percent,
+                        );
+                    }
+                    dirty.store(true, Ordering::SeqCst);
+                }
+                Ok(WorkerCommand::SetSinkInputMute { index, muted }) => {
+                    let _ = set_sink_input_mute(&context, &mut mainloop, index, muted);
+                    dirty.store(true, Ordering::SeqCst);
+                }
+                Ok(WorkerCommand::SetSinkInputVolumePercent { index, percent }) => {
+                    let _ = set_sink_input_volume_percent(&context, &mut mainloop, index, percent);
+                    dirty.store(true, Ordering::SeqCst);
+                }
+                Ok(WorkerCommand::SetSinkPort { port_name }) => {
+                    if let Some(defaults) = last_defaults.as_ref() {
+                        let _ =
+                            set_sink_port(&context, &mut mainloop, &defaults.sink_name, &port_name);
+                    }
+                    dirty.store(true, Ordering::SeqCst);
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return Ok(()),
             }
@@ -334,12 +678,15 @@ fn run_native_session(
 
         if dirty.swap(false, Ordering::SeqCst) {
             match query_current_state(&context, &mut mainloop) {
-                Ok((state, defaults)) => {
+                Ok((state, defaults, controls_state)) => {
                     last_defaults = Some(defaults);
-                    let _ = ui_sender.send(render_format(config, &state));
+                    let _ = ui_sender.send(UiUpdate::Label(render_format(config, &state)));
+                    let _ = ui_sender.send(UiUpdate::Controls(controls_state));
                 }
                 Err(err) => {
-                    let _ = ui_sender.send(escape_markup_text(&format!("audio error: {err}")));
+                    let _ = ui_sender.send(UiUpdate::Label(escape_markup_text(&format!(
+                        "audio error: {err}"
+                    ))));
                 }
             }
         }
@@ -418,7 +765,7 @@ fn is_relevant_pulse_event(
 
     let relevant_facility = matches!(
         facility,
-        Facility::Sink | Facility::Source | Facility::Server | Facility::Card
+        Facility::Sink | Facility::Source | Facility::Server | Facility::Card | Facility::SinkInput
     );
     let relevant_operation = operation.is_some();
     relevant_facility && relevant_operation
@@ -427,9 +774,10 @@ fn is_relevant_pulse_event(
 fn query_current_state(
     context: &Context,
     mainloop: &mut Mainloop,
-) -> Result<(PulseState, ServerDefaults), String> {
+) -> Result<(PulseState, ServerDefaults, AudioControlsState), String> {
     let defaults = query_server_defaults(context, mainloop)?;
     let sink_info = query_sink_info(context, mainloop, &defaults.sink_name)?;
+    let sink_inputs = query_sink_inputs(context, mainloop)?;
 
     let source_muted = match defaults.source_name.as_ref() {
         Some(source_name) => query_source_muted(context, mainloop, source_name)?,
@@ -444,7 +792,15 @@ fn query_current_state(
             bluetooth: sink_info.bluetooth,
             icon_kind: sink_info.icon_kind,
         },
-        defaults,
+        defaults.clone(),
+        AudioControlsState {
+            sink_name: defaults.sink_name.clone(),
+            sink_volume: sink_info.volume,
+            sink_muted: sink_info.muted,
+            sink_ports: sink_info.ports,
+            active_sink_port: sink_info.active_port_name,
+            sink_inputs,
+        },
     ))
 }
 
@@ -486,6 +842,9 @@ struct SinkSnapshot {
     muted: bool,
     bluetooth: bool,
     icon_kind: IconKind,
+    channels: pulse::volume::ChannelVolumes,
+    ports: Vec<SinkPortEntry>,
+    active_port_name: Option<String>,
 }
 
 fn query_sink_info(
@@ -577,7 +936,100 @@ fn snapshot_from_sink_info(info: &SinkInfo) -> SinkSnapshot {
         muted: info.mute,
         bluetooth: lower.contains("bluez") || lower.contains("bluetooth"),
         icon_kind: classify_icon_kind_by_priority(&lower),
+        channels: info.volume,
+        ports: sink_ports_from_info(info),
+        active_port_name: info
+            .active_port
+            .as_ref()
+            .and_then(|port| port.name.as_ref())
+            .map(|name| name.to_string()),
     }
+}
+
+fn sink_ports_from_info(info: &SinkInfo) -> Vec<SinkPortEntry> {
+    let mut ports = Vec::new();
+    for port in &info.ports {
+        let Some(name) = port.name.as_ref() else {
+            continue;
+        };
+        let description = port
+            .description
+            .as_ref()
+            .map(|desc| desc.to_string())
+            .unwrap_or_else(|| name.to_string());
+        ports.push(SinkPortEntry {
+            name: name.to_string(),
+            description,
+            available: port.available,
+        });
+    }
+    ports
+}
+
+fn query_sink_inputs(
+    context: &Context,
+    mainloop: &mut Mainloop,
+) -> Result<Vec<SinkInputEntry>, String> {
+    let slot = Arc::new(Mutex::new(None::<Result<Vec<SinkInputEntry>, String>>));
+    let items = Arc::new(Mutex::new(Vec::<SinkInputEntry>::new()));
+    let mut op = context.introspect().get_sink_input_info_list({
+        let slot = Arc::clone(&slot);
+        let items = Arc::clone(&items);
+        move |result| match result {
+            ListResult::Item(info) => {
+                if let Some(snapshot) = sink_input_from_info(info) {
+                    items
+                        .lock()
+                        .expect("sink input list mutex poisoned")
+                        .push(snapshot);
+                }
+            }
+            ListResult::End => {
+                let mut guard = slot.lock().expect("sink input result mutex poisoned");
+                if guard.is_none() {
+                    let mut values = items
+                        .lock()
+                        .expect("sink input list mutex poisoned")
+                        .clone();
+                    values.sort_by(|a, b| a.name.cmp(&b.name));
+                    *guard = Some(Ok(values));
+                }
+            }
+            ListResult::Error => {
+                *slot.lock().expect("sink input result mutex poisoned") =
+                    Some(Err("pulseaudio sink input list query failed".to_string()));
+            }
+        }
+    });
+    wait_for_operation(mainloop, &mut op)?;
+    let result = slot
+        .lock()
+        .expect("sink input result mutex poisoned")
+        .clone()
+        .unwrap_or_else(|| Err("pulseaudio sink input list query returned no data".to_string()));
+    result
+}
+
+fn sink_input_from_info(info: &SinkInputInfo) -> Option<SinkInputEntry> {
+    if !info.has_volume {
+        return None;
+    }
+    let name = sink_input_display_name(info);
+    Some(SinkInputEntry {
+        index: info.index,
+        name,
+        volume: volume_to_percent(info.volume.avg()),
+        muted: info.mute,
+    })
+}
+
+fn sink_input_display_name(info: &SinkInputInfo) -> String {
+    info.proplist
+        .get_str(properties::APPLICATION_NAME)
+        .or_else(|| info.proplist.get_str("media.name"))
+        .or_else(|| info.proplist.get_str("application.process.binary"))
+        .or_else(|| info.name.as_ref().map(|name| name.to_string()))
+        .unwrap_or_else(|| format!("Stream {}", info.index))
 }
 
 fn volume_to_percent(volume: Volume) -> u32 {
@@ -592,7 +1044,7 @@ fn apply_volume_step(
     increase: bool,
 ) -> Result<(), String> {
     let sink_info = query_sink_info(context, mainloop, sink_name)?;
-    let mut current = query_sink_channel_volumes(context, mainloop, sink_name)?;
+    let mut current = sink_info.channels;
 
     let delta = percent_to_volume_delta(step);
     if increase {
@@ -650,10 +1102,116 @@ fn query_sink_channel_volumes(
     result
 }
 
+fn query_sink_input_channel_volumes(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    index: u32,
+) -> Result<pulse::volume::ChannelVolumes, String> {
+    let slot = Arc::new(Mutex::new(
+        None::<Result<pulse::volume::ChannelVolumes, String>>,
+    ));
+    let mut op = context.introspect().get_sink_input_info(index, {
+        let slot = Arc::clone(&slot);
+        move |result| {
+            let mut guard = slot.lock().expect("sink input volume mutex poisoned");
+            match result {
+                ListResult::Item(info) => {
+                    *guard = Some(Ok(info.volume));
+                }
+                ListResult::End => {
+                    if guard.is_none() {
+                        *guard = Some(Err("pulseaudio sink input volume not found".to_string()));
+                    }
+                }
+                ListResult::Error => {
+                    *guard = Some(Err("pulseaudio sink input volume query failed".to_string()));
+                }
+            }
+        }
+    });
+    wait_for_operation(mainloop, &mut op)?;
+
+    let result = slot
+        .lock()
+        .expect("sink input volume mutex poisoned")
+        .clone()
+        .unwrap_or_else(|| Err("pulseaudio sink input volume query returned no data".to_string()));
+    result
+}
+
+fn set_sink_mute(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    sink_name: &str,
+    muted: bool,
+) -> Result<(), String> {
+    let mut introspector = context.introspect();
+    let mut op = introspector.set_sink_mute_by_name(sink_name, muted, None);
+    wait_for_operation(mainloop, &mut op)
+}
+
+fn set_sink_volume_percent(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    sink_name: &str,
+    percent: u32,
+) -> Result<(), String> {
+    let mut channels = query_sink_channel_volumes(context, mainloop, sink_name)?;
+    let channel_count = channels.len();
+    let target = percent_to_volume_absolute(percent);
+    channels.set(channel_count, target);
+    let mut introspector = context.introspect();
+    let mut op = introspector.set_sink_volume_by_name(sink_name, &channels, None);
+    wait_for_operation(mainloop, &mut op)
+}
+
+fn set_sink_input_mute(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    index: u32,
+    muted: bool,
+) -> Result<(), String> {
+    let mut introspector = context.introspect();
+    let mut op = introspector.set_sink_input_mute(index, muted, None);
+    wait_for_operation(mainloop, &mut op)
+}
+
+fn set_sink_input_volume_percent(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    index: u32,
+    percent: u32,
+) -> Result<(), String> {
+    let mut channels = query_sink_input_channel_volumes(context, mainloop, index)?;
+    let channel_count = channels.len();
+    let target = percent_to_volume_absolute(percent);
+    channels.set(channel_count, target);
+    let mut introspector = context.introspect();
+    let mut op = introspector.set_sink_input_volume(index, &channels, None);
+    wait_for_operation(mainloop, &mut op)
+}
+
+fn set_sink_port(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    sink_name: &str,
+    port_name: &str,
+) -> Result<(), String> {
+    let mut introspector = context.introspect();
+    let mut op = introspector.set_sink_port_by_name(sink_name, port_name, None);
+    wait_for_operation(mainloop, &mut op)
+}
+
 fn percent_to_volume_delta(step: f64) -> Volume {
     let step = normalized_scroll_step(step).clamp(0.1, 100.0);
     let value = ((step / 100.0) * f64::from(Volume::NORMAL.0)).round() as u32;
     Volume(value.max(1))
+}
+
+fn percent_to_volume_absolute(percent: u32) -> Volume {
+    let bounded = percent.min(150);
+    let raw = ((bounded as f64 / 100.0) * f64::from(Volume::NORMAL.0)).round() as u32;
+    Volume(raw)
 }
 
 fn classify_icon_kind_by_priority(content: &str) -> IconKind {
@@ -833,6 +1391,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_controls_defaults_to_disabled_right_click() {
+        let module = ModuleConfig::new(MODULE_TYPE, Map::new());
+        let config = parse_config(&module).expect("config should parse");
+        assert!(!config.controls.enabled);
+        assert!(matches!(
+            config.controls.open,
+            PulseAudioControlsOpenMode::RightClick
+        ));
+    }
+
+    #[test]
     fn volume_icon_from_list_maps_range() {
         let icons = vec!["low".to_string(), "med".to_string(), "high".to_string()];
         assert_eq!(volume_icon_from_list(&icons, 0), "low");
@@ -853,6 +1422,10 @@ mod tests {
         assert!(is_relevant_pulse_event(
             Some(Facility::Server),
             Some(pulse::context::subscribe::Operation::Removed)
+        ));
+        assert!(is_relevant_pulse_event(
+            Some(Facility::SinkInput),
+            Some(pulse::context::subscribe::Operation::Changed)
         ));
         assert!(!is_relevant_pulse_event(
             Some(Facility::Client),

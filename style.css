@@ -236,6 +236,67 @@
   font-size: 11px;
 }
 
+.pulseaudio-controls-popover contents {
+  background: rgba(14, 18, 24, 0.9);
+  border: 1px solid rgba(156, 203, 255, 0.35);
+  border-radius: 0;
+  color: #e3ecfd;
+  padding: 6px;
+}
+
+.pulseaudio-controls-content {
+  min-width: 220px;
+}
+
+.pulseaudio-controls-sink-row,
+.pulseaudio-controls-input-row {
+  padding: 0;
+}
+
+.pulseaudio-controls-ports,
+.pulseaudio-controls-inputs {
+  margin-top: 2px;
+}
+
+.pulseaudio-controls-input-name {
+  color: #e8f2ff;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pulseaudio-control-button {
+  background: rgba(121, 182, 255, 0.12);
+  border: 1px solid rgba(156, 203, 255, 0.3);
+  border-radius: 0;
+  color: #e8f2ff;
+  min-height: 24px;
+  opacity: 0.95;
+  padding: 2px 8px;
+}
+
+.pulseaudio-control-button:hover {
+  background: rgba(121, 182, 255, 0.26);
+  border-color: rgba(156, 203, 255, 0.56);
+  color: #f8fbff;
+  opacity: 1;
+}
+
+.pulseaudio-control-button.active {
+  background: rgba(121, 182, 255, 0.3);
+  border-color: rgba(156, 203, 255, 0.6);
+  opacity: 1;
+}
+
+.pulseaudio-volume-scale {
+  min-width: 100px;
+}
+
+.pulseaudio-controls-empty {
+  color: #d7e6fd;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 /* Tray */
 .tray-item {
   background: rgba(166, 194, 236, 0.1);
