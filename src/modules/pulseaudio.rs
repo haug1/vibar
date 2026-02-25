@@ -387,6 +387,7 @@ fn build_controls_ui(
     content.add_css_class("pulseaudio-controls-content");
     popover.set_child(Some(&content));
 
+    content.append(&build_controls_section_label("Main volume"));
     let sink_row = GtkBox::new(Orientation::Horizontal, 6);
     sink_row.add_css_class("pulseaudio-controls-sink-row");
     content.append(&sink_row);
@@ -406,11 +407,14 @@ fn build_controls_ui(
     ports_box.add_css_class("pulseaudio-controls-ports");
     let sinks_box = GtkBox::new(Orientation::Vertical, 4);
     sinks_box.add_css_class("pulseaudio-controls-sinks");
+    content.append(&build_controls_section_label("Select device"));
     content.append(&sinks_box);
+    content.append(&build_controls_section_label("Select output"));
     content.append(&ports_box);
 
     let inputs_box = GtkBox::new(Orientation::Vertical, 4);
     inputs_box.add_css_class("pulseaudio-controls-inputs");
+    content.append(&build_controls_section_label("Programs volume"));
     content.append(&inputs_box);
 
     install_controls_open_gesture(label, &popover, open_mode);
@@ -448,6 +452,13 @@ fn build_controls_ui(
         suppress_sink_scale_callback,
         sink_muted_state,
     }
+}
+
+fn build_controls_section_label(text: &str) -> Label {
+    let label = Label::new(Some(text));
+    label.add_css_class("pulseaudio-controls-section-title");
+    label.set_xalign(0.0);
+    label
 }
 
 fn install_controls_open_gesture(

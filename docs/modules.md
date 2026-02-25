@@ -760,5 +760,5 @@ Behavior:
 Styling:
 
 - Label classes: `.module.pulseaudio`
-- Popup classes: `.pulseaudio-controls-popover`, `.pulseaudio-controls-content`, `.pulseaudio-controls-sink-row`, `.pulseaudio-controls-sinks`, `.pulseaudio-controls-ports`, `.pulseaudio-controls-inputs`, `.pulseaudio-controls-input-row`, `.pulseaudio-controls-input-name`, `.pulseaudio-control-button`, `.pulseaudio-volume-scale`, `.pulseaudio-controls-empty`
+- Popup classes: `.pulseaudio-controls-popover`, `.pulseaudio-controls-content`, `.pulseaudio-controls-section-title`, `.pulseaudio-controls-sink-row`, `.pulseaudio-controls-sinks`, `.pulseaudio-controls-ports`, `.pulseaudio-controls-inputs`, `.pulseaudio-controls-input-row`, `.pulseaudio-controls-input-name`, `.pulseaudio-control-button`, `.pulseaudio-volume-scale`, `.pulseaudio-controls-empty`
 - Optional extra class via `class` field.
