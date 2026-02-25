@@ -22,8 +22,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
-    ModuleBuildContext, ModuleConfig,
+    apply_css_classes, attach_primary_click_command, attach_secondary_click_command,
+    escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig,
 };
 
 use super::ModuleFactory;
@@ -74,6 +74,10 @@ pub(crate) struct PulseAudioConfig {
     pub(crate) click: Option<String>,
     #[serde(rename = "on-click", default)]
     pub(crate) on_click: Option<String>,
+    #[serde(rename = "right-click", default)]
+    pub(crate) right_click: Option<String>,
+    #[serde(rename = "on-right-click", default)]
+    pub(crate) on_right_click: Option<String>,
     #[serde(default)]
     pub(crate) controls: PulseAudioControlsConfig,
     #[serde(default)]
@@ -242,7 +246,8 @@ impl ModuleFactory for PulseAudioFactory {
     fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
         let click_command = parsed.click.clone().or(parsed.on_click.clone());
-        Ok(build_pulseaudio_module(parsed, click_command).upcast())
+        let right_click_command = parsed.right_click.clone().or(parsed.on_right_click.clone());
+        Ok(build_pulseaudio_module(parsed, click_command, right_click_command).upcast())
     }
 }
 
@@ -289,7 +294,11 @@ pub(crate) fn parse_config(module: &ModuleConfig) -> Result<PulseAudioConfig, St
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<String>) -> Label {
+fn build_pulseaudio_module(
+    config: PulseAudioConfig,
+    click_command: Option<String>,
+    right_click_command: Option<String>,
+) -> Label {
     let label = Label::new(None);
     label.add_css_class("module");
     label.add_css_class("pulseaudio");
@@ -311,6 +320,14 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
         attach_primary_click_command(&label, click_command);
         None
     };
+    if config.controls.enabled
+        && matches!(config.controls.open, PulseAudioControlsOpenMode::RightClick)
+        && right_click_command.is_some()
+    {
+        eprintln!("pulseaudio right-click command is ignored when controls.open=right-click");
+    } else {
+        attach_secondary_click_command(&label, right_click_command);
+    }
 
     let scroll_step = normalized_scroll_step(config.scroll_step);
     if (scroll_step - config.scroll_step).abs() > f64::EPSILON {
@@ -1586,6 +1603,27 @@ mod tests {
             config.controls.open,
             PulseAudioControlsOpenMode::RightClick
         ));
+    }
+
+    #[test]
+    fn parse_config_supports_right_click_aliases() {
+        let right_click_module = ModuleConfig::new(
+            MODULE_TYPE,
+            Map::from_iter([("right-click".to_string(), json!("foo"))]),
+        );
+        let right_click_cfg =
+            parse_config(&right_click_module).expect("right-click config should parse");
+        assert_eq!(right_click_cfg.right_click.as_deref(), Some("foo"));
+        assert!(right_click_cfg.on_right_click.is_none());
+
+        let on_right_click_module = ModuleConfig::new(
+            MODULE_TYPE,
+            Map::from_iter([("on-right-click".to_string(), json!("bar"))]),
+        );
+        let on_right_click_cfg =
+            parse_config(&on_right_click_module).expect("on-right-click config should parse");
+        assert!(on_right_click_cfg.right_click.is_none());
+        assert_eq!(on_right_click_cfg.on_right_click.as_deref(), Some("bar"));
     }
 
     #[test]

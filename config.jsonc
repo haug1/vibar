@@ -95,13 +95,15 @@
       },
       {
         "type": "pulseaudio",
-        "click": "pavucontrol",
+        // Optional command for right click:
+        "right-click": "pavucontrol",
         "controls": {
           // Optional inline popup controls (default disabled):
           "enabled": true,
           // "left-click" or "right-click" (default).
           // If set to "left-click", the top-level `click` command is ignored.
-          "open": "right-click",
+          // If set to "right-click", `right-click` / `on-right-click` is ignored.
+          "open": "left-click",
         },
         "class": "v-square",
       },

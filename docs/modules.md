@@ -27,7 +27,11 @@ Top-level config uses three layout areas:
       },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
       { "type": "cpu", "format": "{used_percentage}% ", "interval_secs": 1 },
-      { "type": "temperature", "format": "{temperatureC}°C {icon}", "thermal-zone": 0 },
+      {
+        "type": "temperature",
+        "format": "{temperatureC}°C {icon}",
+        "thermal-zone": 0,
+      },
       { "type": "battery", "format": "{capacity}% {icon}" },
       { "type": "clock" },
     ],
@@ -830,9 +834,9 @@ Schema:
   },
   "controls": {
     "enabled": true,
-    "open": "right-click"
+    "open": "left-click"
   },
-  "click": "pavucontrol",
+  "right-click": "pavucontrol",
   "class": "optional-css-classes"
 }
 ```
@@ -878,6 +882,8 @@ Fields:
     - Default: `right-click`
 - `click` (optional): shell command run on left click.
 - `on-click` (optional): alias for `click`.
+- `right-click` (optional): shell command run on right click.
+- `on-right-click` (optional): alias for `right-click`.
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Format placeholders:
@@ -901,6 +907,7 @@ Behavior:
   - per-stream mute toggles + volume sliders for active playback streams
   - percentage labels next to main/per-stream sliders with immediate updates while dragging
 - If `controls.open=left-click`, module `click` command is ignored.
+- If `controls.open=right-click`, module `right-click` command is ignored.
 
 Styling:
 

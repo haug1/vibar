@@ -75,12 +75,22 @@ pub(crate) fn build_module(
 }
 
 pub(crate) fn attach_primary_click_command(widget: &impl IsA<Widget>, command: Option<String>) {
+    if command.is_some() {
+        widget.add_css_class("clickable");
+    }
+    attach_click_command(widget, 1, command);
+}
+
+pub(crate) fn attach_secondary_click_command(widget: &impl IsA<Widget>, command: Option<String>) {
+    attach_click_command(widget, 3, command);
+}
+
+fn attach_click_command(widget: &impl IsA<Widget>, button: u32, command: Option<String>) {
     let Some(command) = command else {
         return;
     };
 
-    widget.add_css_class("clickable");
-    let click = GestureClick::builder().button(1).build();
+    let click = GestureClick::builder().button(button).build();
     click.connect_pressed(move |_, _, _, _| {
         let command = command.clone();
         std::thread::spawn(move || {

@@ -69,7 +69,7 @@ make ci
 - Backlight module supports scroll brightness control (default logind DBus path or custom scroll commands)
 - Battery module with `/sys/class/power_supply` auto-discovery, `format-icons`, and dynamic level/status CSS classes
 - Temperature module with Linux sensor path/thermal-zone sources, threshold states, and Waybar-style placeholders
-- PulseAudio module supports optional popup controls for default sink mute/volume, active app stream volume/mute, and output-port switching
+- PulseAudio module supports optional popup controls for default sink mute/volume, active app stream volume/mute, and output-port switching, plus separate left/right click commands
 - Config file search order:
   - `~/.config/vibar/config.jsonc`
   - `./config.jsonc` (fallback)
