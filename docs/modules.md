@@ -27,6 +27,7 @@ Top-level config uses three layout areas:
       },
       { "type": "disk", "format": "{free} \uf0a0 ", "click": "dolphin" },
       { "type": "cpu", "format": "{used_percentage}% ", "interval_secs": 1 },
+      { "type": "temperature", "format": "{temperatureC}°C {icon}", "thermal-zone": 0 },
       { "type": "battery", "format": "{capacity}% {icon}" },
       { "type": "clock" },
     ],
@@ -542,6 +543,75 @@ Styling:
 
 - Label classes: `.module.cpu`
 - Dynamic usage classes: `.usage-low`, `.usage-medium`, `.usage-high`, `.usage-critical`, `.usage-unknown`
+- Optional extra class via `class` field.
+
+## `temperature`
+
+Schema:
+
+```json
+{
+  "type": "temperature",
+  "format": "{temperatureC}°C {icon}",
+  "format-warning": "{temperatureC}°C {icon}",
+  "format-critical": "{temperatureC}°C {icon}",
+  "interval_secs": 10,
+  "thermal-zone": 0,
+  "path": "/sys/class/hwmon/hwmon0/temp1_input",
+  "warning-threshold": 70,
+  "critical-threshold": 85,
+  "format-icons": ["", "", "", "", ""],
+  "click": "optional shell command",
+  "class": "optional-css-classes"
+}
+```
+
+Fields:
+
+- `format` (optional): output format template.
+  - Supports Pango markup.
+  - Placeholder values are markup-escaped before insertion.
+  - Default: `{temperatureC}°C {icon}`
+- `format-warning` / `format_warning` (optional): template override when warning threshold is reached.
+- `format-critical` / `format_critical` (optional): template override when critical threshold is reached.
+- `interval_secs` (optional): polling interval in seconds.
+  - Default: `10`
+  - Minimum: `1` (values below are clamped)
+- `path` / `hwmon-path` / `hwmon_path` (optional): explicit sensor file to read.
+  - When omitted, module uses `thermal-zone`.
+- `thermal-zone` / `thermal_zone` (optional): thermal zone index used for default path.
+  - Default: `0` (path `/sys/class/thermal/thermal_zone0/temp`)
+- `warning-threshold` / `warning_threshold` (optional): warning temperature in Celsius.
+- `critical-threshold` / `critical_threshold` (optional): critical temperature in Celsius.
+- `format-icons` (optional): icon list mapped by Celsius value over `0..100`.
+  - Empty list renders `{icon}` as empty text.
+  - Default: `["", "", "", "", ""]`
+- `click` (optional): shell command run on left click.
+- `on-click` (optional): alias for `click`.
+- `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
+
+Format placeholders:
+
+- `{temperature_c}` / `{temperatureC}`
+- `{temperature_f}` / `{temperatureF}`
+- `{temperature_k}` / `{temperatureK}`
+- `{icon}`
+
+Behavior:
+
+- Reads numeric temperature values from Linux sensor files.
+- Supports both millidegree input (for example `42500`) and degree input (for example `42`).
+- Hides the module when the selected format renders empty output text.
+- Adds temperature-state CSS class on each update:
+  - `temperature-normal` (default)
+  - `temperature-warning` (at/above warning threshold)
+  - `temperature-critical` (at/above critical threshold)
+  - `temperature-unknown` when reading/parsing fails
+
+Styling:
+
+- Label classes: `.module.temperature`
+- Dynamic temperature classes: `.temperature-normal`, `.temperature-warning`, `.temperature-critical`, `.temperature-unknown`
 - Optional extra class via `class` field.
 
 ## `backlight`

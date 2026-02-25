@@ -58,6 +58,18 @@
         "format": "{used_percentage}% \uf2db",
       },
       {
+        "type": "temperature",
+        "class": "v-square",
+        "format": "{temperatureC}°C {icon}",
+        "interval_secs": 10,
+        "warning-threshold": 70,
+        "critical-threshold": 85,
+        // Optional explicit sensor path (instead of thermal-zone):
+        // "path": "/sys/class/hwmon/hwmon0/temp1_input",
+        // Optional thermal zone index for default path /sys/class/thermal/thermal_zoneX/temp:
+        "thermal-zone": 0,
+      },
+      {
         "type": "backlight",
         "class": "v-square",
         "format": "{percent}% {icon}",

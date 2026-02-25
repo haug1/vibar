@@ -165,6 +165,14 @@
   color: #b2ffc9;
 }
 
+.temperature.temperature-warning {
+  background: rgba(255, 210, 122, 0.25);
+}
+
+.temperature.temperature-critical {
+  background: rgba(255, 84, 84, 0.25);
+}
+
 .playerctl.status-playing {
   opacity: 1;
 }

@@ -22,7 +22,8 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - Sway integration includes `sway/workspaces`, `sway/mode`, and `sway/window` (focused window title gated per output)
 - `sway/window` supports Pango-markup `format` templates via `{}` / `{title}` placeholders
 - `sway/workspaces` supports container `class` plus per-button `button-class` style overrides
-- `sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `disk`, and `pulseaudio` support Pango markup in format fields (with escaped placeholder values)
+- `sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `temperature`, `disk`, and `pulseaudio` support Pango markup in format fields (with escaped placeholder values)
+- `temperature` module polls Linux sensor files (`path`/`hwmon-path` or thermal zone default), supports warning/critical thresholds, and adds dynamic `temperature-*` state classes
 - `backlight` module reads `/sys/class/backlight`, supports `format-icons` + optional explicit `device`, hides when panel power is reported off, and uses an event-driven udev backend with immediate GTK-main-thread UI dispatch plus coarse interval-based fallback/resync
 - `backlight` also supports Pango-markup `format` templates with `{percent}`, `{icon}`, `{brightness}`, `{max}`, and `{device}` placeholders
 - `backlight` supports scroll brightness control (`scroll-step`, `min-brightness`) via logind DBus by default, with optional `on-scroll-up` / `on-scroll-down` command overrides

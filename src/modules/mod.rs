@@ -9,6 +9,7 @@ pub(crate) mod memory;
 pub(crate) mod playerctl;
 pub(crate) mod pulseaudio;
 pub(crate) mod sway;
+pub(crate) mod temperature;
 pub(crate) mod tray;
 
 use gtk::prelude::*;
@@ -56,6 +57,7 @@ const FACTORIES: &[&dyn ModuleFactory] = &[
     &sway::mode::FACTORY,
     &sway::window::FACTORY,
     &sway::workspaces::FACTORY,
+    &temperature::FACTORY,
     &clock::FACTORY,
     &tray::FACTORY,
 ];
