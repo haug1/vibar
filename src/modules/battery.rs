@@ -177,8 +177,9 @@ pub(crate) fn build_battery_module(
 }
 
 fn apply_battery_ui_update(label: &Label, update: &BatteryUiUpdate) {
-    label.set_visible(update.visible);
-    if update.visible {
+    let visible = update.visible && !update.text.trim().is_empty();
+    label.set_visible(visible);
+    if visible {
         label.set_markup(&update.text);
     }
 
@@ -309,9 +310,10 @@ impl BatteryBackend {
 
     fn build_ui_update(&self, format: &str, format_icons: &[String]) -> BatteryUiUpdate {
         if let Some(snapshot) = self.snapshot.as_ref() {
+            let text = render_format(format, snapshot, format_icons);
             return BatteryUiUpdate {
-                text: render_format(format, snapshot, format_icons),
-                visible: true,
+                visible: !text.trim().is_empty(),
+                text,
                 level_class: battery_level_css_class(snapshot.capacity),
                 status_class: battery_status_css_class(&snapshot.status),
             };

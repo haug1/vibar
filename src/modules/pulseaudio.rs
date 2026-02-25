@@ -354,7 +354,13 @@ fn build_pulseaudio_module(config: PulseAudioConfig, click_command: Option<Strin
         move || {
             while let Ok(update) = ui_receiver.try_recv() {
                 match update {
-                    UiUpdate::Label(text) => label.set_markup(&text),
+                    UiUpdate::Label(text) => {
+                        let visible = !text.trim().is_empty();
+                        label.set_visible(visible);
+                        if visible {
+                            label.set_markup(&text);
+                        }
+                    }
                     UiUpdate::Controls(state) => {
                         if let Some(controls_ui) = controls_ui.as_ref() {
                             refresh_controls_ui(controls_ui, &state, worker_tx.clone());

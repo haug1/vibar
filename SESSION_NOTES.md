@@ -31,6 +31,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `battery` supports Pango-markup `format` templates with `{capacity}`, `{percent}`, `{status}`, `{icon}`, and `{device}` placeholders, plus dynamic `battery-*` level classes and `status-*` charging classes
 - `exec` supports Pango-markup `format` templates with `{}` / `{text}` placeholders and top-level JSON property placeholders
 - `exec` also supports `signal` (`SIGRTMIN + N`) for immediate refresh triggers (for example `pkill -RTMIN+8 vibar`)
+- Format-driven modules hide themselves when rendered output text is empty
 - `playerctl` supports `max-width` (caps width while shrinking to content when short)
 - `playerctl` shows a visible `…` cue when text is truncated
 - `playerctl` hover tooltip appears only when text is truncated

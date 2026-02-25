@@ -174,8 +174,12 @@ fn refresh_mode(label: &Label, format: &str) {
         return;
     }
 
-    label.set_visible(true);
-    label.set_markup(&render_markup_template(format, &[("{}", &mode)]));
+    let rendered = render_markup_template(format, &[("{}", &mode)]);
+    let visible = !rendered.trim().is_empty();
+    label.set_visible(visible);
+    if visible {
+        label.set_markup(&rendered);
+    }
 }
 
 #[cfg(test)]

@@ -180,7 +180,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
                         .max(1);
                     sync_controls_width(controls, width);
                 }
-                root.set_visible(visibility);
+                root.set_visible(visibility && !plain_text.trim().is_empty());
                 apply_state_class(&root, state_class);
             }
             ControlFlow::Continue

@@ -148,7 +148,11 @@ pub(crate) fn build_cpu_module(
         let label = label.clone();
         move || {
             while let Ok(update) = receiver.try_recv() {
-                label.set_markup(&update.text);
+                let visible = !update.text.trim().is_empty();
+                label.set_visible(visible);
+                if visible {
+                    label.set_markup(&update.text);
+                }
                 for class_name in CPU_USAGE_CLASSES {
                     label.remove_css_class(class_name);
                 }

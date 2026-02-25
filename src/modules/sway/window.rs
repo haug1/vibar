@@ -204,11 +204,12 @@ fn refresh_window(label: &Label, output_filter: Option<&str>, format: &str) {
         return;
     }
 
-    label.set_visible(true);
-    label.set_markup(&render_markup_template(
-        format,
-        &[("{}", &title), ("{title}", &title)],
-    ));
+    let rendered = render_markup_template(format, &[("{}", &title), ("{title}", &title)]);
+    let visible = !rendered.trim().is_empty();
+    label.set_visible(visible);
+    if visible {
+        label.set_markup(&rendered);
+    }
 }
 
 #[derive(Debug, Clone)]

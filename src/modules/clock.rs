@@ -93,7 +93,11 @@ pub(crate) fn build_clock_module(
             let now = Local::now();
             let rendered_time = now.format(&time_fmt).to_string();
             let rendered = render_markup_template(&template, &[("{}", &rendered_time)]);
-            label.set_markup(&rendered);
+            let visible = !rendered.trim().is_empty();
+            label.set_visible(visible);
+            if visible {
+                label.set_markup(&rendered);
+            }
         }
     };
 

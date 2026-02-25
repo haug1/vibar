@@ -117,7 +117,11 @@ pub(crate) fn build_memory_module(
         let label = label.clone();
         move || {
             while let Ok(text) = receiver.try_recv() {
-                label.set_markup(&text);
+                let visible = !text.trim().is_empty();
+                label.set_visible(visible);
+                if visible {
+                    label.set_markup(&text);
+                }
             }
             ControlFlow::Continue
         }

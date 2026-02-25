@@ -61,6 +61,10 @@ Built-in utility classes (optional):
 - `.v-pill`: applies pill-style module chrome (background, border, radius, padding).
 - `.v-square`: same chrome style with square corners (`border-radius: 0`).
 
+Format visibility rule:
+
+- Modules with `format`-driven text hide themselves when the rendered output text is empty.
+
 ## `group`
 
 Schema:

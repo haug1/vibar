@@ -264,8 +264,11 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
 }
 
 fn apply_backlight_ui_update(label: &Label, update: &BacklightUiUpdate) {
-    label.set_markup(&update.text);
-    label.set_visible(update.visible);
+    let visible = update.visible && !update.text.trim().is_empty();
+    label.set_visible(visible);
+    if visible {
+        label.set_markup(&update.text);
+    }
     for class_name in BACKLIGHT_LEVEL_CLASSES {
         label.remove_css_class(class_name);
     }
