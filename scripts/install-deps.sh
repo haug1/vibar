@@ -26,24 +26,6 @@ install_arch() {
     rustup
 }
 
-install_debian() {
-  ${SUDO} apt update
-
-  ${SUDO} apt install -y \
-    build-essential \
-    pkg-config \
-    libudev-dev \
-    libgtk-4-dev \
-    libgtk4-layer-shell-dev \
-    libwayland-dev \
-    wayland-protocols \
-    curl
-
-  if ! command -v rustup >/dev/null 2>&1; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-  fi
-}
-
 install_fedora() {
   ${SUDO} dnf install -y \
     make \
@@ -61,9 +43,6 @@ case "${ID:-}" in
   arch|cachyos|endeavouros|manjaro)
     install_arch
     ;;
-  ubuntu|debian|linuxmint|pop)
-    install_debian
-    ;;
   fedora|rhel|centos)
     install_fedora
     ;;
@@ -72,11 +51,9 @@ case "${ID:-}" in
       install_arch
     elif [[ "${ID_LIKE:-}" == *"fedora"* ]] || [[ "${ID_LIKE:-}" == *"rhel"* ]]; then
       install_fedora
-    elif [[ "${ID_LIKE:-}" == *"debian"* ]]; then
-      install_debian
     else
       echo "Unsupported distro: ${PRETTY_NAME:-unknown}" >&2
-      echo "Please install manually: GTK4 dev libs, Wayland dev libs, rustup." >&2
+      echo "Supported by this script: Arch-based and Fedora/RHEL-based distros." >&2
       exit 1
     fi
     ;;
