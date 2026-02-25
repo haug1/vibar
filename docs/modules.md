@@ -755,6 +755,7 @@ Behavior:
   - output device list with availability labels and default-device marker
   - output-port buttons for the selected output device
   - per-stream mute toggles + volume sliders for active playback streams
+  - percentage labels next to main/per-stream sliders with immediate updates while dragging
 - If `controls.open=left-click`, module `click` command is ignored.
 
 Styling:

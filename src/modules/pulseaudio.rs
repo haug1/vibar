@@ -222,6 +222,7 @@ enum UiUpdate {
 struct PulseAudioControlsUi {
     sink_mute_button: Button,
     sink_volume_scale: Scale,
+    sink_volume_percent_label: Label,
     sinks_box: GtkBox,
     sink_ports_box: GtkBox,
     sink_inputs_box: GtkBox,
@@ -402,6 +403,9 @@ fn build_controls_ui(
     sink_volume_scale.set_hexpand(true);
     sink_volume_scale.set_draw_value(false);
     sink_row.append(&sink_volume_scale);
+    let sink_volume_percent_label = Label::new(Some("0%"));
+    sink_volume_percent_label.add_css_class("pulseaudio-volume-percent");
+    sink_row.append(&sink_volume_percent_label);
 
     let ports_box = GtkBox::new(Orientation::Vertical, 4);
     ports_box.add_css_class("pulseaudio-controls-ports");
@@ -424,13 +428,14 @@ fn build_controls_ui(
     {
         let worker_tx = worker_tx.clone();
         let suppress = suppress_sink_scale_callback.clone();
+        let percent_label = sink_volume_percent_label.clone();
         sink_volume_scale.connect_value_changed(move |scale| {
+            let percent = scale.value().round().clamp(0.0, CONTROLS_UI_MAX_PERCENT) as u32;
+            percent_label.set_text(&format!("{percent}%"));
             if suppress.load(Ordering::Relaxed) {
                 return;
             }
-            let _ = worker_tx.send(WorkerCommand::SetSinkVolumePercent {
-                percent: scale.value().round().clamp(0.0, CONTROLS_UI_MAX_PERCENT) as u32,
-            });
+            let _ = worker_tx.send(WorkerCommand::SetSinkVolumePercent { percent });
         });
     }
     {
@@ -446,6 +451,7 @@ fn build_controls_ui(
     PulseAudioControlsUi {
         sink_mute_button,
         sink_volume_scale,
+        sink_volume_percent_label,
         sinks_box,
         sink_ports_box: ports_box,
         sink_inputs_box: inputs_box,
@@ -510,6 +516,9 @@ fn refresh_controls_ui(
     controls_ui
         .sink_volume_scale
         .set_tooltip_text(Some(&format!("Selected sink: {}%", state.sink_volume)));
+    controls_ui
+        .sink_volume_percent_label
+        .set_text(&format!("{}%", state.sink_volume));
 
     clear_box_children(&controls_ui.sinks_box);
     if state.sinks.is_empty() {
@@ -617,15 +626,19 @@ fn refresh_controls_ui(
             scale.set_draw_value(false);
             scale.set_width_request(120);
             scale.set_value((input.volume as f64).min(CONTROLS_UI_MAX_PERCENT));
+            let percent_label = Label::new(Some(&format!("{}%", input.volume)));
+            percent_label.add_css_class("pulseaudio-volume-percent");
             let worker_tx_for_volume = worker_tx.clone();
             let index = input.index;
+            let percent_label_for_change = percent_label.clone();
             scale.connect_value_changed(move |scale| {
-                let _ = worker_tx_for_volume.send(WorkerCommand::SetSinkInputVolumePercent {
-                    index,
-                    percent: scale.value().round().clamp(0.0, CONTROLS_UI_MAX_PERCENT) as u32,
-                });
+                let percent = scale.value().round().clamp(0.0, CONTROLS_UI_MAX_PERCENT) as u32;
+                percent_label_for_change.set_text(&format!("{percent}%"));
+                let _ = worker_tx_for_volume
+                    .send(WorkerCommand::SetSinkInputVolumePercent { index, percent });
             });
             row.append(&scale);
+            row.append(&percent_label);
 
             controls_ui.sink_inputs_box.append(&row);
         }

@@ -301,6 +301,13 @@
   min-width: 100px;
 }
 
+.pulseaudio-volume-percent {
+  color: #d7e6fd;
+  font-size: 11px;
+  min-width: 40px;
+  opacity: 0.9;
+}
+
 .pulseaudio-controls-empty {
   color: #d7e6fd;
   font-size: 11px;
