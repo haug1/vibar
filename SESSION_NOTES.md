@@ -31,7 +31,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `playerctl` supports `max-width` (caps width while shrinking to content when short)
 - `playerctl` shows a visible `…` cue when text is truncated
 - `playerctl` hover tooltip appears only when text is truncated
-- `pulseaudio` supports optional popup controls (`controls.enabled`) for default sink mute/volume, active sink-input streams (per-app mute/volume), and default output port switching
+- `pulseaudio` supports optional popup controls (`controls.enabled`) for default sink mute/volume, active sink-input streams (per-app mute/volume), output-device switching (default sink selection), and per-device output port switching
 - Config lookup order: `~/.config/vibar/config.jsonc` then `./config.jsonc`
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS

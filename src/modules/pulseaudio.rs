@@ -132,6 +132,8 @@ struct PulseState {
 #[derive(Debug, Clone)]
 struct AudioControlsState {
     sink_name: String,
+    sinks: Vec<SinkDeviceEntry>,
+    selected_sink_name: String,
     sink_volume: u32,
     sink_muted: bool,
     sink_ports: Vec<SinkPortEntry>,
@@ -144,6 +146,14 @@ struct SinkPortEntry {
     name: String,
     description: String,
     available: pulse::def::PortAvailable,
+}
+
+#[derive(Debug, Clone)]
+struct SinkDeviceEntry {
+    name: String,
+    description: String,
+    available: bool,
+    is_default: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -176,12 +186,31 @@ enum IconKind {
 
 #[derive(Debug, Clone)]
 enum WorkerCommand {
-    VolumeStep { increase: bool, step: f64 },
-    SetSinkMute { muted: bool },
-    SetSinkVolumePercent { percent: u32 },
-    SetSinkInputMute { index: u32, muted: bool },
-    SetSinkInputVolumePercent { index: u32, percent: u32 },
-    SetSinkPort { port_name: String },
+    VolumeStep {
+        increase: bool,
+        step: f64,
+    },
+    SetSinkMute {
+        muted: bool,
+    },
+    SetSinkVolumePercent {
+        percent: u32,
+    },
+    SetSinkInputMute {
+        index: u32,
+        muted: bool,
+    },
+    SetSinkInputVolumePercent {
+        index: u32,
+        percent: u32,
+    },
+    SetDefaultSink {
+        sink_name: String,
+    },
+    SetSinkPort {
+        sink_name: String,
+        port_name: String,
+    },
 }
 
 enum UiUpdate {
@@ -193,6 +222,7 @@ enum UiUpdate {
 struct PulseAudioControlsUi {
     sink_mute_button: Button,
     sink_volume_scale: Scale,
+    sinks_box: GtkBox,
     sink_ports_box: GtkBox,
     sink_inputs_box: GtkBox,
     suppress_sink_scale_callback: Arc<AtomicBool>,
@@ -374,6 +404,9 @@ fn build_controls_ui(
 
     let ports_box = GtkBox::new(Orientation::Vertical, 4);
     ports_box.add_css_class("pulseaudio-controls-ports");
+    let sinks_box = GtkBox::new(Orientation::Vertical, 4);
+    sinks_box.add_css_class("pulseaudio-controls-sinks");
+    content.append(&sinks_box);
     content.append(&ports_box);
 
     let inputs_box = GtkBox::new(Orientation::Vertical, 4);
@@ -409,6 +442,7 @@ fn build_controls_ui(
     PulseAudioControlsUi {
         sink_mute_button,
         sink_volume_scale,
+        sinks_box,
         sink_ports_box: ports_box,
         sink_inputs_box: inputs_box,
         suppress_sink_scale_callback,
@@ -464,7 +498,44 @@ fn refresh_controls_ui(
         .store(false, Ordering::Relaxed);
     controls_ui
         .sink_volume_scale
-        .set_tooltip_text(Some(&format!("Default sink: {}%", state.sink_volume)));
+        .set_tooltip_text(Some(&format!("Selected sink: {}%", state.sink_volume)));
+
+    clear_box_children(&controls_ui.sinks_box);
+    if state.sinks.is_empty() {
+        let no_sinks_label = Label::new(Some("No output devices"));
+        no_sinks_label.add_css_class("pulseaudio-controls-empty");
+        no_sinks_label.set_xalign(0.0);
+        controls_ui.sinks_box.append(&no_sinks_label);
+    } else {
+        for sink in &state.sinks {
+            let status = if sink.available {
+                "available"
+            } else {
+                "unavailable"
+            };
+            let text = if sink.is_default {
+                format!("{} (default, {status})", sink.description)
+            } else {
+                format!("{} ({status})", sink.description)
+            };
+            let button = Button::with_label(&text);
+            button.add_css_class("pulseaudio-control-button");
+            if sink.name == state.selected_sink_name {
+                button.add_css_class("active");
+            }
+            if !sink.available {
+                button.set_sensitive(false);
+            }
+            let worker_tx_for_sink = worker_tx.clone();
+            let sink_name = sink.name.clone();
+            button.connect_clicked(move |_| {
+                let _ = worker_tx_for_sink.send(WorkerCommand::SetDefaultSink {
+                    sink_name: sink_name.clone(),
+                });
+            });
+            controls_ui.sinks_box.append(&button);
+        }
+    }
 
     clear_box_children(&controls_ui.sink_ports_box);
     if state.sink_ports.is_empty() {
@@ -483,9 +554,11 @@ fn refresh_controls_ui(
                 button.set_sensitive(false);
             }
             let port_name = port.name.clone();
+            let sink_name = state.selected_sink_name.clone();
             let worker_tx = worker_tx.clone();
             button.connect_clicked(move |_| {
                 let _ = worker_tx.send(WorkerCommand::SetSinkPort {
+                    sink_name: sink_name.clone(),
                     port_name: port_name.clone(),
                 });
             });
@@ -664,11 +737,15 @@ fn run_native_session(
                     let _ = set_sink_input_volume_percent(&context, &mut mainloop, index, percent);
                     dirty.store(true, Ordering::SeqCst);
                 }
-                Ok(WorkerCommand::SetSinkPort { port_name }) => {
-                    if let Some(defaults) = last_defaults.as_ref() {
-                        let _ =
-                            set_sink_port(&context, &mut mainloop, &defaults.sink_name, &port_name);
-                    }
+                Ok(WorkerCommand::SetDefaultSink { sink_name }) => {
+                    let _ = set_default_sink(&mut context, &mut mainloop, &sink_name);
+                    dirty.store(true, Ordering::SeqCst);
+                }
+                Ok(WorkerCommand::SetSinkPort {
+                    sink_name,
+                    port_name,
+                }) => {
+                    let _ = set_sink_port(&context, &mut mainloop, &sink_name, &port_name);
                     dirty.store(true, Ordering::SeqCst);
                 }
                 Err(TryRecvError::Empty) => break,
@@ -776,6 +853,7 @@ fn query_current_state(
     mainloop: &mut Mainloop,
 ) -> Result<(PulseState, ServerDefaults, AudioControlsState), String> {
     let defaults = query_server_defaults(context, mainloop)?;
+    let sinks = query_sinks(context, mainloop, &defaults.sink_name)?;
     let sink_info = query_sink_info(context, mainloop, &defaults.sink_name)?;
     let sink_inputs = query_sink_inputs(context, mainloop)?;
 
@@ -795,6 +873,8 @@ fn query_current_state(
         defaults.clone(),
         AudioControlsState {
             sink_name: defaults.sink_name.clone(),
+            sinks,
+            selected_sink_name: defaults.sink_name.clone(),
             sink_volume: sink_info.volume,
             sink_muted: sink_info.muted,
             sink_ports: sink_info.ports,
@@ -964,6 +1044,74 @@ fn sink_ports_from_info(info: &SinkInfo) -> Vec<SinkPortEntry> {
         });
     }
     ports
+}
+
+fn query_sinks(
+    context: &Context,
+    mainloop: &mut Mainloop,
+    default_sink_name: &str,
+) -> Result<Vec<SinkDeviceEntry>, String> {
+    let slot = Arc::new(Mutex::new(None::<Result<Vec<SinkDeviceEntry>, String>>));
+    let items = Arc::new(Mutex::new(Vec::<SinkDeviceEntry>::new()));
+    let mut op = context.introspect().get_sink_info_list({
+        let slot = Arc::clone(&slot);
+        let items = Arc::clone(&items);
+        let default_sink_name = default_sink_name.to_string();
+        move |result| match result {
+            ListResult::Item(info) => {
+                if let Some(snapshot) = sink_device_from_info(info, &default_sink_name) {
+                    items
+                        .lock()
+                        .expect("sink list mutex poisoned")
+                        .push(snapshot);
+                }
+            }
+            ListResult::End => {
+                let mut guard = slot.lock().expect("sink list result mutex poisoned");
+                if guard.is_none() {
+                    let mut values = items.lock().expect("sink list mutex poisoned").clone();
+                    values.sort_by(|a, b| a.description.cmp(&b.description));
+                    *guard = Some(Ok(values));
+                }
+            }
+            ListResult::Error => {
+                *slot.lock().expect("sink list result mutex poisoned") =
+                    Some(Err("pulseaudio sink list query failed".to_string()));
+            }
+        }
+    });
+    wait_for_operation(mainloop, &mut op)?;
+    let result = slot
+        .lock()
+        .expect("sink list result mutex poisoned")
+        .clone()
+        .unwrap_or_else(|| Err("pulseaudio sink list query returned no data".to_string()));
+    result
+}
+
+fn sink_device_from_info(info: &SinkInfo, default_sink_name: &str) -> Option<SinkDeviceEntry> {
+    let name = info.name.as_ref().map(|value| value.to_string())?;
+    let description = info
+        .description
+        .as_ref()
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| name.clone());
+    let available = sink_is_available(info);
+    Some(SinkDeviceEntry {
+        is_default: name == default_sink_name,
+        name,
+        description,
+        available,
+    })
+}
+
+fn sink_is_available(info: &SinkInfo) -> bool {
+    if info.ports.is_empty() {
+        return true;
+    }
+    info.ports
+        .iter()
+        .any(|port| port.available != pulse::def::PortAvailable::No)
 }
 
 fn query_sink_inputs(
@@ -1199,6 +1347,15 @@ fn set_sink_port(
 ) -> Result<(), String> {
     let mut introspector = context.introspect();
     let mut op = introspector.set_sink_port_by_name(sink_name, port_name, None);
+    wait_for_operation(mainloop, &mut op)
+}
+
+fn set_default_sink(
+    context: &mut Context,
+    mainloop: &mut Mainloop,
+    sink_name: &str,
+) -> Result<(), String> {
+    let mut op = context.set_default_sink(sink_name, |_| {});
     wait_for_operation(mainloop, &mut op)
 }
 

@@ -752,12 +752,13 @@ Behavior:
 - Scroll up/down adjusts default sink volume by `scroll-step`.
 - With `controls.enabled=true`, popup includes:
   - default sink mute toggle + volume slider
+  - output device list with availability labels and default-device marker
+  - output-port buttons for the selected output device
   - per-stream mute toggles + volume sliders for active playback streams
-  - output-port buttons for the current default sink
 - If `controls.open=left-click`, module `click` command is ignored.
 
 Styling:
 
 - Label classes: `.module.pulseaudio`
-- Popup classes: `.pulseaudio-controls-popover`, `.pulseaudio-controls-content`, `.pulseaudio-controls-sink-row`, `.pulseaudio-controls-ports`, `.pulseaudio-controls-inputs`, `.pulseaudio-controls-input-row`, `.pulseaudio-controls-input-name`, `.pulseaudio-control-button`, `.pulseaudio-volume-scale`, `.pulseaudio-controls-empty`
+- Popup classes: `.pulseaudio-controls-popover`, `.pulseaudio-controls-content`, `.pulseaudio-controls-sink-row`, `.pulseaudio-controls-sinks`, `.pulseaudio-controls-ports`, `.pulseaudio-controls-inputs`, `.pulseaudio-controls-input-row`, `.pulseaudio-controls-input-name`, `.pulseaudio-control-button`, `.pulseaudio-volume-scale`, `.pulseaudio-controls-empty`
 - Optional extra class via `class` field.

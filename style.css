@@ -254,6 +254,7 @@
 }
 
 .pulseaudio-controls-ports,
+.pulseaudio-controls-sinks,
 .pulseaudio-controls-inputs {
   margin-top: 2px;
 }
