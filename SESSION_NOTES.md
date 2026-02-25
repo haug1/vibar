@@ -36,6 +36,8 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `playerctl` shows a visible `…` cue when text is truncated
 - `playerctl` hover tooltip appears only when text is truncated
 - `pulseaudio` supports optional popup controls (`controls.enabled`) for default sink mute/volume, active sink-input streams (per-app mute/volume), output-device switching (default sink selection), and per-device output port switching; also supports optional `right-click`/`on-right-click` command binding (ignored when `controls.open=right-click`)
+- `tray` accepts StatusNotifier watcher item entries with either explicit `service/path` addresses or service-only names (service-only falls back to `/StatusNotifierItem`)
+- When no external StatusNotifier watcher exists, `tray` starts an in-process watcher fallback and treats host registration as available (`IsStatusNotifierHostRegistered=true`)
 - Config lookup order: `~/.config/vibar/config.jsonc`, then embedded `config.jsonc` in binary
 - Embedded default CSS can be layered with optional user CSS (`style.path`)
 - `style.load-default` can disable embedded default CSS
@@ -62,7 +64,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 ## Troubleshooting Flags
 
 - `VIBAR_DEBUG_WORKSPACES=1`: log sway workspace refresh state
-- `VIBAR_DEBUG_TRAY=1`: log tray DBus click method calls/errors
+- `VIBAR_DEBUG_TRAY=1`: log tray DBus click method calls/errors plus startup discovery diagnostics (watcher/registered items/snapshot resolution)
 - `VIBAR_DEBUG_DOM=1`: print GTK widget tree + CSS classes at startup and periodically
 - `VIBAR_DEBUG_DOM_INTERVAL_SECS=<n>`: override DOM dump interval (minimum `1`, default `10`)
 

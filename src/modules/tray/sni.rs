@@ -1,6 +1,10 @@
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
+use std::time::Duration;
 
+use zbus::blocking::connection::Builder as ConnectionBuilder;
 use zbus::blocking::{Connection, Proxy};
+use zbus::message::Header;
 use zbus::Error as ZbusError;
 use zbus::Result as ZbusResult;
 
@@ -8,6 +12,75 @@ use super::types::{
     TrayIconPixmap, TrayItemSnapshot, ITEM_INTERFACE, WATCHER_DESTINATION, WATCHER_INTERFACE,
     WATCHER_PATH,
 };
+
+#[derive(Debug, Default)]
+struct WatcherState {
+    registered_items: Vec<String>,
+}
+
+#[derive(Clone)]
+struct LocalStatusNotifierWatcher {
+    state: Arc<Mutex<WatcherState>>,
+}
+
+#[zbus::interface(name = "org.kde.StatusNotifierWatcher")]
+impl LocalStatusNotifierWatcher {
+    fn register_status_notifier_item(&self, service: &str, #[zbus(header)] header: Header<'_>) {
+        let sender = header.sender().map(|value| value.to_string());
+        let Some(item_id) = normalize_registered_item_id(service, sender.as_deref()) else {
+            if tray_debug_enabled() {
+                eprintln!(
+                    "vibar/tray: rejected RegisterStatusNotifierItem service={service:?} sender={sender:?}"
+                );
+            }
+            return;
+        };
+
+        let Ok(mut guard) = self.state.lock() else {
+            return;
+        };
+        if !guard.registered_items.iter().any(|item| item == &item_id) {
+            if tray_debug_enabled() {
+                eprintln!(
+                    "vibar/tray: registered item via local watcher: {item_id} (service={service:?} sender={sender:?})"
+                );
+            }
+            guard.registered_items.push(item_id);
+            if tray_debug_enabled() {
+                eprintln!(
+                    "vibar/tray: local watcher item count={}",
+                    guard.registered_items.len()
+                );
+            }
+        }
+    }
+
+    fn register_status_notifier_host(&self, service: &str) {
+        if tray_debug_enabled() {
+            eprintln!("vibar/tray: local watcher host registration: service={service:?}");
+        }
+    }
+
+    #[zbus(property)]
+    fn registered_status_notifier_items(&self) -> Vec<String> {
+        self.state
+            .lock()
+            .map(|guard| guard.registered_items.clone())
+            .unwrap_or_default()
+    }
+
+    #[zbus(property)]
+    fn is_status_notifier_host_registered(&self) -> bool {
+        true
+    }
+
+    #[zbus(property)]
+    fn protocol_version(&self) -> i32 {
+        0
+    }
+}
+
+static LOCAL_WATCHER_INIT: OnceLock<()> = OnceLock::new();
 
 pub(super) fn activate_item(destination: String, path: String, x: i32, y: i32) {
     call_item_method(destination, path, "Activate", x, y);
@@ -96,7 +169,12 @@ fn call_item_methods_with_fallback(
 }
 
 pub(super) fn fetch_tray_snapshot() -> Vec<TrayItemSnapshot> {
+    ensure_local_watcher_fallback();
+
     let Ok(connection) = Connection::session() else {
+        if tray_debug_enabled() {
+            eprintln!("vibar/tray: no session bus while fetching tray snapshot");
+        }
         return Vec::new();
     };
 
@@ -106,28 +184,70 @@ pub(super) fn fetch_tray_snapshot() -> Vec<TrayItemSnapshot> {
         WATCHER_PATH,
         WATCHER_INTERFACE,
     ) else {
+        if tray_debug_enabled() {
+            eprintln!(
+                "vibar/tray: failed to create watcher proxy {WATCHER_DESTINATION}{WATCHER_PATH}"
+            );
+        }
         return Vec::new();
     };
 
-    let host_name = format!("vibar-{}", std::process::id());
+    // Empty host name tells watcher to use sender bus name for registration.
+    let host_name = "";
     let _register_result: ZbusResult<()> =
-        watcher.call("RegisterStatusNotifierHost", &(host_name.as_str(),));
+        watcher.call("RegisterStatusNotifierHost", &(host_name,));
+    if tray_debug_enabled() {
+        if let Err(err) = &_register_result {
+            eprintln!("vibar/tray: RegisterStatusNotifierHost failed: {err}");
+        }
+    }
 
     let Ok(items) = watcher.get_property::<Vec<String>>("RegisteredStatusNotifierItems") else {
+        if tray_debug_enabled() {
+            eprintln!("vibar/tray: failed to read RegisteredStatusNotifierItems");
+        }
         return Vec::new();
     };
+    if tray_debug_enabled() {
+        eprintln!(
+            "vibar/tray: watcher returned {} registered item(s): {:?}",
+            items.len(),
+            items
+        );
+    }
 
     let mut snapshots = items
         .into_iter()
-        .filter_map(parse_item_address)
+        .filter_map(|raw| {
+            let parsed = parse_item_address(raw.clone());
+            if parsed.is_none() && tray_debug_enabled() {
+                eprintln!("vibar/tray: invalid tray item address from watcher: {raw:?}");
+            }
+            parsed
+        })
         .filter_map(|(id, destination, path)| fetch_item(&connection, id, destination, path))
         .collect::<Vec<_>>();
 
     snapshots.sort_by(|a, b| a.id.cmp(&b.id));
+    if tray_debug_enabled() {
+        eprintln!(
+            "vibar/tray: resolved {} tray snapshot item(s)",
+            snapshots.len()
+        );
+    }
     snapshots
 }
 
 pub(super) fn parse_item_address(raw: String) -> Option<(String, String, String)> {
+    if raw.is_empty() {
+        return None;
+    }
+
+    // Some watchers publish just the bus name; default object path is /StatusNotifierItem.
+    if !raw.contains('/') {
+        return Some((raw.clone(), raw, "/StatusNotifierItem".to_string()));
+    }
+
     if raw.starts_with('/') {
         return None;
     }
@@ -148,13 +268,22 @@ fn fetch_item(
     path: String,
 ) -> Option<TrayItemSnapshot> {
     let (icon_name, icon_pixmap, icon_theme_path, title) = {
-        let proxy = Proxy::new(
+        let proxy = match Proxy::new(
             connection,
             destination.as_str(),
             path.as_str(),
             ITEM_INTERFACE,
-        )
-        .ok()?;
+        ) {
+            Ok(proxy) => proxy,
+            Err(err) => {
+                if tray_debug_enabled() {
+                    eprintln!(
+                        "vibar/tray: failed item proxy for {destination}{path} ({id}): {err}"
+                    );
+                }
+                return None;
+            }
+        };
 
         let icon_name_value = proxy
             .get_property::<String>("IconName")
@@ -233,6 +362,56 @@ fn tray_debug_enabled() -> bool {
         .unwrap_or(false)
 }
 
+fn ensure_local_watcher_fallback() {
+    let _ = LOCAL_WATCHER_INIT.get_or_init(|| {
+        thread::spawn(move || {
+            let state = Arc::new(Mutex::new(WatcherState::default()));
+            let watcher = LocalStatusNotifierWatcher { state };
+
+            let connection = match ConnectionBuilder::session()
+                .and_then(|builder| builder.name(WATCHER_DESTINATION))
+                .and_then(|builder| builder.serve_at(WATCHER_PATH, watcher))
+                .and_then(|builder| builder.build())
+            {
+                Ok(connection) => {
+                    if tray_debug_enabled() {
+                        eprintln!("vibar/tray: started local StatusNotifierWatcher fallback");
+                    }
+                    connection
+                }
+                Err(err) => {
+                    if tray_debug_enabled() {
+                        eprintln!("vibar/tray: local watcher fallback unavailable: {err}");
+                    }
+                    return;
+                }
+            };
+
+            let _keep_connection_alive = connection;
+            loop {
+                thread::sleep(Duration::from_secs(3600));
+            }
+        });
+    });
+}
+
+fn normalize_registered_item_id(service: &str, sender: Option<&str>) -> Option<String> {
+    if service.is_empty() {
+        return None;
+    }
+
+    if service.starts_with('/') {
+        let destination = sender?;
+        return Some(format!("{destination}{service}"));
+    }
+
+    if service.contains('/') {
+        return Some(service.to_string());
+    }
+
+    Some(format!("{service}/StatusNotifierItem"))
+}
+
 fn is_method_missing_error(err: &ZbusError) -> bool {
     matches!(
         err,
@@ -244,7 +423,7 @@ fn is_method_missing_error(err: &ZbusError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::select_icon_pixmap;
+    use super::{normalize_registered_item_id, parse_item_address, select_icon_pixmap};
 
     #[test]
     fn select_icon_pixmap_picks_largest_valid_entry() {
@@ -257,5 +436,33 @@ mod tests {
 
         assert_eq!(picked.width, 24);
         assert_eq!(picked.height, 24);
+    }
+
+    #[test]
+    fn parse_item_address_accepts_service_name_without_path() {
+        let parsed = parse_item_address("org.kde.StatusNotifierItem-123-1".to_string())
+            .expect("service-only address should parse");
+        assert_eq!(parsed.0, "org.kde.StatusNotifierItem-123-1");
+        assert_eq!(parsed.1, "org.kde.StatusNotifierItem-123-1");
+        assert_eq!(parsed.2, "/StatusNotifierItem");
+    }
+
+    #[test]
+    fn parse_item_address_rejects_empty_value() {
+        assert!(parse_item_address(String::new()).is_none());
+    }
+
+    #[test]
+    fn normalize_registered_item_id_uses_sender_for_path_only() {
+        let id = normalize_registered_item_id("/StatusNotifierItem", Some(":1.42"))
+            .expect("path-only service should normalize");
+        assert_eq!(id, ":1.42/StatusNotifierItem");
+    }
+
+    #[test]
+    fn normalize_registered_item_id_defaults_service_only_path() {
+        let id = normalize_registered_item_id("org.example.Tray", None)
+            .expect("service-only entry should normalize");
+        assert_eq!(id, "org.example.Tray/StatusNotifierItem");
     }
 }

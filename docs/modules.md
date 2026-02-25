@@ -793,6 +793,7 @@ Fields:
 Behavior:
 
 - StatusNotifier-based tray.
+- If no external `org.kde.StatusNotifierWatcher` is available, vibar starts an in-process watcher fallback.
 - Left click triggers SNI `Activate`.
 - Right click requests SNI menu and renders DBusMenu in GTK popover.
 - Middle click triggers SNI `SecondaryActivate`.

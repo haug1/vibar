@@ -25,6 +25,8 @@ This document contains implementation-facing details that are intentionally kept
   - Tooltip behavior: hover tooltip appears only while the visible playerctl text is truncated.
   - Implementation layout: `src/modules/playerctl/mod.rs` orchestration + `src/modules/playerctl/config.rs` (schema/defaults), `src/modules/playerctl/backend.rs` (MPRIS DBus backend), `src/modules/playerctl/model.rs` (pure metadata/format helpers), `src/modules/playerctl/ui.rs` (GTK tooltip/carousel/controls UI wiring).
 - PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`, and supports an optional popover controls UI (default sink mute/volume, active sink-input stream mute/volume, output-device switching via `set_default_sink`, and per-device port switching) plus optional dedicated right-click command wiring (`right-click` / `on-right-click`).
+- Tray module accepts both canonical watcher item addresses (`service/path`) and service-only entries (defaults to `/StatusNotifierItem`) when building SNI proxies.
+- Tray module includes an in-process `StatusNotifierWatcher` fallback when no external watcher is present; fallback reports host-registered state as `true` and logs registration calls when `VIBAR_DEBUG_TRAY=1`.
 - Backlight module runs an event-driven backend for `/sys/class/backlight` with cached device/snapshot state, dispatches UI updates immediately on GTK main context, uses `udev` callbacks as primary trigger, and keeps interval-based resync as fallback/safety; supports explicit `device` selection or largest-`max_brightness` fallback.
 - Backlight default scroll behavior uses logind DBus `SetBrightness`; optional `on-scroll-up`/`on-scroll-down` commands can override that behavior.
 - Battery module runs an event-driven backend for `/sys/class/power_supply` with `udev` callbacks as primary trigger and interval-based resync fallback; auto-discovers battery devices (or uses explicit `device`) and maps capacity/status to dynamic CSS classes for styling.
@@ -52,6 +54,7 @@ This document contains implementation-facing details that are intentionally kept
 - To log sway workspace state each refresh, run with `VIBAR_DEBUG_WORKSPACES=1`.
   - Example: `VIBAR_DEBUG_WORKSPACES=1 cargo run --locked`
 - To log tray DBus click method calls/errors, run with `VIBAR_DEBUG_TRAY=1`.
+  - Also logs tray discovery path (watcher proxy/registration, registered item IDs, address parsing, and resolved snapshot count) for startup diagnostics.
   - Example: `VIBAR_DEBUG_TRAY=1 cargo run --locked`
 - To print the GTK widget tree with CSS classes for selector discovery, run with `VIBAR_DEBUG_DOM=1`.
   - Dumps at startup and then periodically (default every 10s).
