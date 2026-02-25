@@ -16,7 +16,7 @@ Top-level config uses three layout areas:
     "left": [{ "type": "sway/workspaces" }],
     "center": [
       { "type": "sway/mode", "class": "v-pill" },
-      { "type": "sway/window" }
+      { "type": "sway/window" },
     ],
     "right": [
       {
@@ -166,7 +166,7 @@ Fields:
   - Supported placeholders: `{}` and `{title}`
   - Default: `{}`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Behavior:
@@ -200,7 +200,7 @@ Fields:
   - Replaced mode text is markup-escaped before insertion.
   - Default: `{}`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Behavior:
@@ -237,7 +237,7 @@ Fields:
   - Replaced time text is markup-escaped before insertion.
   - Default: `{}`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Behavior:
@@ -294,7 +294,7 @@ Fields:
 - `show-when-paused` / `show_when_paused` (optional): when `hide-when-idle=true`, keep module visible while paused.
   - Default: `true`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `controls` (optional): popover controls UI configuration.
   - `enabled` (optional): enable left-click popover controls (`Previous`, `PlayPause`, `Next`).
     - Default: `false`
@@ -357,6 +357,7 @@ Schema:
   "format": "<span style=\"italic\">{}</span>",
   "click": "optional shell command",
   "interval_secs": 5,
+  "signal": 8,
   "class": "optional-css-classes"
 }
 ```
@@ -369,10 +370,13 @@ Fields:
   - Placeholder values are markup-escaped before insertion.
   - Default: `{text}`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `5`
   - Minimum: `1` (values below are clamped)
+- `signal` (optional): realtime signal offset (`SIGRTMIN + signal`) that triggers an immediate refresh.
+  - Valid range: `1..=(SIGRTMAX - SIGRTMIN)`.
+  - Example trigger: `pkill -RTMIN+8 vibar` when `"signal": 8`.
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Behavior:
@@ -385,7 +389,8 @@ Behavior:
 - Formatting placeholders:
   - `{}` and `{text}` map to the parsed output text.
   - For JSON output, top-level string/number/bool properties can be referenced as `{property}`.
-- Identical `command` + `interval_secs` instances share one backend poller across bar windows.
+- Identical `command` + `format` + `interval_secs` instances share one backend poller across bar windows.
+- Signal-triggered refreshes wake the shared backend immediately (without waiting for the next interval tick).
 
 Styling:
 
@@ -414,7 +419,7 @@ Fields:
   - Placeholder values are markup-escaped before insertion.
   - Default: `{free}`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `path` (optional): filesystem path passed to `df`.
   - Default: `/`
 - `interval_secs` (optional): polling interval in seconds.
@@ -462,7 +467,7 @@ Fields:
   - Placeholder values are markup-escaped before insertion.
   - Default: `{used_percentage}%`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `5`
   - Minimum: `1` (values below are clamped)
@@ -509,7 +514,7 @@ Fields:
   - Placeholder values are markup-escaped before insertion.
   - Default: `{used_percentage}%`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `interval_secs` (optional): polling interval in seconds.
   - Default: `5`
   - Minimum: `1` (values below are clamped)
@@ -581,7 +586,7 @@ Fields:
 - `on-scroll-down` (optional): shell command for scroll-down.
   - If either scroll command is set, custom commands are used for scrolling instead of default brightness control.
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Format placeholders:
@@ -717,7 +722,7 @@ Fields:
   - `default` is an array of volume-level icons.
   - Default: `["", "", ""]`
 - `click` (optional): shell command run on left click.
-- `on-click` (optional): alias for `click` (Waybar-style key).
+- `on-click` (optional): alias for `click`.
 - `class` (optional): extra CSS class(es) on the module label (whitespace-separated).
 
 Format placeholders:

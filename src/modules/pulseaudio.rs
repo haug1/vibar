@@ -576,7 +576,7 @@ fn snapshot_from_sink_info(info: &SinkInfo) -> SinkSnapshot {
         volume,
         muted: info.mute,
         bluetooth: lower.contains("bluez") || lower.contains("bluetooth"),
-        icon_kind: classify_icon_kind_waybar_style(&lower),
+        icon_kind: classify_icon_kind_by_priority(&lower),
     }
 }
 
@@ -656,8 +656,7 @@ fn percent_to_volume_delta(step: f64) -> Volume {
     Volume(value.max(1))
 }
 
-fn classify_icon_kind_waybar_style(content: &str) -> IconKind {
-    // Keep same priority order as Waybar's pulseaudio module.
+fn classify_icon_kind_by_priority(content: &str) -> IconKind {
     if content.contains("headphone") {
         return IconKind::Headphone;
     }
@@ -869,24 +868,21 @@ mod tests {
     }
 
     #[test]
-    fn classify_icon_kind_matches_waybar_order() {
+    fn classify_icon_kind_matches_priority_order() {
         assert_eq!(
-            classify_icon_kind_waybar_style("headphone speaker"),
+            classify_icon_kind_by_priority("headphone speaker"),
             IconKind::Headphone
         );
         assert_eq!(
-            classify_icon_kind_waybar_style("my speaker"),
+            classify_icon_kind_by_priority("my speaker"),
             IconKind::Speaker
         );
-        assert_eq!(classify_icon_kind_waybar_style("dock hdmi"), IconKind::Hdmi);
-        assert_eq!(classify_icon_kind_waybar_style("usb hifi"), IconKind::Hifi);
+        assert_eq!(classify_icon_kind_by_priority("dock hdmi"), IconKind::Hdmi);
+        assert_eq!(classify_icon_kind_by_priority("usb hifi"), IconKind::Hifi);
         assert_eq!(
-            classify_icon_kind_waybar_style("built in sound card"),
+            classify_icon_kind_by_priority("built in sound card"),
             IconKind::Default
         );
-        assert_eq!(
-            classify_icon_kind_waybar_style("usb car kit"),
-            IconKind::Car
-        );
+        assert_eq!(classify_icon_kind_by_priority("usb car kit"), IconKind::Car);
     }
 }

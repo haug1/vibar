@@ -17,6 +17,7 @@ This document contains implementation-facing details that are intentionally kept
 - `group` is a composite module that recursively calls `build_module(...)` for child entries.
 - `exec` supports Waybar-compatible output parsing (`i3blocks` line mode and JSON `text`/`class`) and applies dynamic output classes each update.
 - `exec` also supports format templating with safe markup rendering (`{}` / `{text}` for parsed text plus top-level JSON key placeholders).
+- `exec` supports `signal` refresh triggers (`SIGRTMIN + N`) and routes them into the shared backend so modules refresh immediately without waiting for interval polling.
 - `playerctl` reads media metadata/status from MPRIS over DBus (`zbus`), updates from DBus signals plus a lightweight periodic position refresh, and supports optional controls popover + `SetPosition` seeking.
   - Width mode: `max-width` caps viewport while allowing short text to shrink naturally.
   - Overflow cue: when clipped, playerctl renders a visible `…` indicator.

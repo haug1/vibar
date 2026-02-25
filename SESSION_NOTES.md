@@ -27,6 +27,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - `backlight` also supports Pango-markup `format` templates with `{percent}`, `{icon}`, `{brightness}`, `{max}`, and `{device}` placeholders
 - `backlight` supports scroll brightness control (`scroll-step`, `min-brightness`) via logind DBus by default, with optional `on-scroll-up` / `on-scroll-down` command overrides
 - `exec` supports Pango-markup `format` templates with `{}` / `{text}` placeholders and top-level JSON property placeholders
+- `exec` also supports `signal` (`SIGRTMIN + N`) for immediate refresh triggers (for example `pkill -RTMIN+8 vibar`)
 - `playerctl` supports `max-width` (caps width while shrinking to content when short)
 - `playerctl` shows a visible `…` cue when text is truncated
 - `playerctl` hover tooltip appears only when text is truncated

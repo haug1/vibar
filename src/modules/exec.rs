@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -31,6 +31,8 @@ pub(crate) struct ExecConfig {
     #[serde(default = "default_exec_interval")]
     pub(crate) interval_secs: u32,
     #[serde(default)]
+    pub(crate) signal: Option<i32>,
+    #[serde(default)]
     pub(crate) class: Option<String>,
 }
 
@@ -54,11 +56,13 @@ impl ModuleFactory for ExecFactory {
     fn init(&self, config: &ModuleConfig, _context: &ModuleBuildContext) -> Result<Widget, String> {
         let parsed = parse_config(config)?;
         let click_command = parsed.click.or(parsed.on_click);
+        let signal = normalize_exec_signal(parsed.signal)?;
         Ok(build_exec_module(
             parsed.command,
             parsed.format,
             click_command,
             parsed.interval_secs,
+            signal,
             parsed.class,
         )
         .upcast())
@@ -82,6 +86,7 @@ pub(crate) fn build_exec_module(
     format: String,
     click_command: Option<String>,
     interval_secs: u32,
+    signal: Option<i32>,
     class: Option<String>,
 ) -> Label {
     let label = Label::new(None);
@@ -100,7 +105,7 @@ pub(crate) fn build_exec_module(
 
     attach_primary_click_command(&label, click_command);
 
-    let receiver = subscribe_shared_exec_output(command, format, effective_interval_secs);
+    let receiver = subscribe_shared_exec_output(command, format, effective_interval_secs, signal);
 
     glib::timeout_add_local(std::time::Duration::from_millis(200), {
         let label = label.clone();
@@ -127,6 +132,28 @@ pub(crate) fn normalized_exec_interval(interval_secs: u32) -> u32 {
     interval_secs.max(MIN_EXEC_INTERVAL_SECS)
 }
 
+pub(crate) fn normalize_exec_signal(signal: Option<i32>) -> Result<Option<i32>, String> {
+    signal.map(exec_signal_to_signum).transpose()
+}
+
+fn exec_signal_to_signum(signal: i32) -> Result<i32, String> {
+    if signal < 1 {
+        return Err("invalid exec module config: `signal` must be >= 1".to_string());
+    }
+
+    let rt_min = libc::SIGRTMIN();
+    let rt_max = libc::SIGRTMAX();
+    let max_signal = rt_max - rt_min;
+
+    if signal > max_signal {
+        return Err(format!(
+            "invalid exec module config: `signal` must be <= {max_signal}"
+        ));
+    }
+
+    Ok(rt_min + signal)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ExecSharedKey {
     command: String,
@@ -144,6 +171,7 @@ struct ExecRenderedOutput {
 struct SharedExecBackend {
     latest: Mutex<Option<ExecRenderedOutput>>,
     subscribers: Mutex<Vec<std::sync::mpsc::Sender<ExecRenderedOutput>>>,
+    refresh_sender: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 impl SharedExecBackend {
@@ -174,6 +202,25 @@ impl SharedExecBackend {
             .expect("exec backend subscribers mutex poisoned")
             .retain(|sender| sender.send(text.clone()).is_ok());
     }
+
+    fn set_refresh_sender(&self, sender: std::sync::mpsc::Sender<()>) {
+        *self
+            .refresh_sender
+            .lock()
+            .expect("exec backend refresh sender mutex poisoned") = Some(sender);
+    }
+
+    fn request_refresh(&self) {
+        let sender = self
+            .refresh_sender
+            .lock()
+            .expect("exec backend refresh sender mutex poisoned")
+            .clone();
+
+        if let Some(sender) = sender {
+            let _ = sender.send(());
+        }
+    }
 }
 
 type SharedExecMap = HashMap<ExecSharedKey, Arc<SharedExecBackend>>;
@@ -187,12 +234,14 @@ fn subscribe_shared_exec_output(
     command: String,
     format: String,
     interval_secs: u32,
+    signal: Option<i32>,
 ) -> std::sync::mpsc::Receiver<ExecRenderedOutput> {
     let key = ExecSharedKey {
         command,
         format,
         interval_secs,
     };
+
     let backend = {
         let mut backends = shared_exec_backends()
             .lock()
@@ -208,16 +257,74 @@ fn subscribe_shared_exec_output(
         }
     };
 
+    if let Some(signum) = signal {
+        register_exec_signal(signum, &backend);
+    }
+
     let (sender, receiver) = std::sync::mpsc::channel::<ExecRenderedOutput>();
     backend.add_subscriber(sender);
     receiver
 }
 
 fn start_shared_exec_worker(key: ExecSharedKey, backend: Arc<SharedExecBackend>) {
+    let (refresh_sender, refresh_receiver) = std::sync::mpsc::channel::<()>();
+    backend.set_refresh_sender(refresh_sender);
+
     std::thread::spawn(move || loop {
         backend.broadcast(run_exec_command(&key.command, &key.format));
-        std::thread::sleep(Duration::from_secs(u64::from(key.interval_secs)));
+        match refresh_receiver.recv_timeout(Duration::from_secs(u64::from(key.interval_secs))) {
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+        }
     });
+}
+
+#[derive(Default)]
+struct ExecSignalRegistry {
+    registered_signals: HashSet<i32>,
+    signal_backends: HashMap<i32, Vec<Arc<SharedExecBackend>>>,
+}
+
+fn exec_signal_registry() -> &'static Mutex<ExecSignalRegistry> {
+    static EXEC_SIGNAL_REGISTRY: OnceLock<Mutex<ExecSignalRegistry>> = OnceLock::new();
+    EXEC_SIGNAL_REGISTRY.get_or_init(|| Mutex::new(ExecSignalRegistry::default()))
+}
+
+fn register_exec_signal(signum: i32, backend: &Arc<SharedExecBackend>) {
+    let should_install = {
+        let mut registry = exec_signal_registry()
+            .lock()
+            .expect("exec signal registry mutex poisoned");
+        let listeners = registry.signal_backends.entry(signum).or_default();
+        if !listeners
+            .iter()
+            .any(|existing| Arc::ptr_eq(existing, backend))
+        {
+            listeners.push(Arc::clone(backend));
+        }
+        registry.registered_signals.insert(signum)
+    };
+
+    if should_install {
+        glib::source::unix_signal_add_local(signum, move || {
+            notify_exec_signal(signum);
+            ControlFlow::Continue
+        });
+    }
+}
+
+fn notify_exec_signal(signum: i32) {
+    let backends = exec_signal_registry()
+        .lock()
+        .expect("exec signal registry mutex poisoned")
+        .signal_backends
+        .get(&signum)
+        .cloned()
+        .unwrap_or_default();
+
+    for backend in backends {
+        backend.request_refresh();
+    }
 }
 
 fn run_exec_command(command: &str, format: &str) -> ExecRenderedOutput {
@@ -399,6 +506,50 @@ mod tests {
         );
         let on_click_cfg = parse_config(&on_click_module).expect("on-click config should parse");
         assert_eq!(on_click_cfg.on_click.as_deref(), Some("bar"));
+    }
+
+    #[test]
+    fn parse_config_supports_signal_field() {
+        let module = ModuleConfig::new(
+            MODULE_TYPE,
+            serde_json::from_value(json!({
+                "command": "echo ok",
+                "signal": 8
+            }))
+            .expect("module config map should parse"),
+        );
+        let cfg = parse_config(&module).expect("signal config should parse");
+        assert_eq!(cfg.signal, Some(8));
+    }
+
+    #[test]
+    fn normalize_exec_signal_accepts_none() {
+        assert_eq!(
+            normalize_exec_signal(None).expect("none should be valid"),
+            None
+        );
+    }
+
+    #[test]
+    fn normalize_exec_signal_rejects_zero() {
+        let err = normalize_exec_signal(Some(0)).expect_err("signal=0 should be invalid");
+        assert!(err.contains("`signal` must be >= 1"));
+    }
+
+    #[test]
+    fn normalize_exec_signal_maps_to_realtime_signal_number() {
+        let signum = normalize_exec_signal(Some(8))
+            .expect("signal=8 should be valid")
+            .expect("signal number should be present");
+        assert_eq!(signum, libc::SIGRTMIN() + 8);
+    }
+
+    #[test]
+    fn normalize_exec_signal_rejects_values_above_rtmax() {
+        let max_signal = libc::SIGRTMAX() - libc::SIGRTMIN();
+        let err = normalize_exec_signal(Some(max_signal + 1))
+            .expect_err("signal above rtmax should be invalid");
+        assert!(err.contains("`signal` must be <="));
     }
 
     #[test]
