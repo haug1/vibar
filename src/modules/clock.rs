@@ -103,8 +103,21 @@ pub(crate) fn build_clock_module(
 
     update();
 
+    let label_weak = label.downgrade();
     glib::timeout_add_seconds_local(1, move || {
-        update();
+        let Some(label) = label_weak.upgrade() else {
+            return ControlFlow::Break;
+        };
+
+        let now = Local::now();
+        let rendered_time = now.format(&time_fmt).to_string();
+        let rendered = render_markup_template(&template, &[("{}", &rendered_time)]);
+        let visible = !rendered.trim().is_empty();
+        label.set_visible(visible);
+        if visible {
+            label.set_markup(&rendered);
+        }
+
         ControlFlow::Continue
     });
 
