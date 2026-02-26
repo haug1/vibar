@@ -365,10 +365,13 @@ fn build_pulseaudio_module(
     let render_config = config.clone();
     std::thread::spawn(move || run_native_loop(ui_sender, worker_rx, render_config));
 
+    let label_weak = label.downgrade();
     glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
-        let label = label.clone();
         let controls_ui = controls_ui.clone();
         move || {
+            let Some(label) = label_weak.upgrade() else {
+                return ControlFlow::Break;
+            };
             while let Ok(update) = ui_receiver.try_recv() {
                 match update {
                     UiUpdate::Label(text) => {
