@@ -11,7 +11,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 - CI build environment: GitHub Actions Ubuntu runner with Fedora 41 container for consistent GTK4 layer-shell dev packages
 - CI system package setup is sourced from `scripts/install-deps.sh` (Fedora path) to keep local/CI dependency definitions aligned
 - `scripts/install-deps.sh` supports Arch-based and Fedora/RHEL-based dependency bootstrap only (Debian/Ubuntu removed)
-- Dependabot is configured for weekly `cargo` + GitHub Actions updates; Dependabot PRs enable GitHub auto-merge and merge after required checks pass
+- Dependabot is configured for weekly `cargo` + GitHub Actions updates, with separate lockfile-only indirect cargo updates and GTK stack grouping (`gtk4`, `gtk4-layer-shell`, `glib`, `gio`); Dependabot PRs enable GitHub auto-merge and merge after required checks pass
 - Upgrade branch `chore/upgrade-pr-remediation-plan` now carries `zbus = 5.14` with passing `make ci`
 - To reduce `glib`/`gio` partial-bump type skew, code now prefers `gtk::glib` / `gtk::gio` reexports for GTK-facing types
 

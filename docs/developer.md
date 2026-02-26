@@ -74,4 +74,4 @@ This document contains implementation-facing details that are intentionally kept
 - For modules with shell click actions, use `modules::attach_primary_click_command(...)` for left click (`.clickable` class + gesture wiring), and `modules::attach_secondary_click_command(...)` for optional right-click command wiring.
 - Keep OS package requirements centralized in `scripts/install-deps.sh`; CI installs system dependencies via that script to avoid drift.
 - Dependency bootstrap script currently targets Arch-based and Fedora/RHEL-based distros only.
-- Dependabot automation is configured in `.github/dependabot.yml`; Dependabot PRs enable GitHub auto-merge via `.github/workflows/dependabot-automerge.yml` and still require CI to pass before merge.
+- Dependabot automation is configured in `.github/dependabot.yml`; cargo updates include direct dependency checks plus lockfile-only indirect updates, and GTK stack dependencies (`gtk4`, `gtk4-layer-shell`, `glib`, `gio`) are grouped in one PR. Dependabot PRs enable GitHub auto-merge via `.github/workflows/dependabot-automerge.yml` and still require CI to pass before merge.

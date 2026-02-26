@@ -12,6 +12,29 @@ updates:
     labels: [dependencies, rust]
     commit-message:
       prefix: deps
+    groups:
+      gtk-stack:
+        patterns:
+          - "gtk4"
+          - "gtk4-layer-shell"
+          - "glib"
+          - "gio"
+
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:15"
+      timezone: UTC
+    rebase-strategy: auto
+    versioning-strategy: lockfile-only
+    allow:
+      - dependency-type: indirect
+    open-pull-requests-limit: 5
+    labels: [dependencies, rust, lockfile]
+    commit-message:
+      prefix: deps
 
   - package-ecosystem: github-actions
     directory: "/"
