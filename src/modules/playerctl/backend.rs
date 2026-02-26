@@ -54,22 +54,26 @@ pub(super) fn run_event_backend(ui_sender: Sender<BackendUpdate>, player_filter:
     start_name_owner_listener(trigger_tx.clone());
     start_properties_listener(trigger_tx);
 
-    publish_snapshot(&ui_sender, player_filter.as_deref());
+    if !publish_snapshot(&ui_sender, player_filter.as_deref()) {
+        return;
+    }
 
     while let Ok(_) | Err(RecvTimeoutError::Timeout) =
         trigger_rx.recv_timeout(Duration::from_millis(500))
     {
-        publish_snapshot(&ui_sender, player_filter.as_deref());
+        if !publish_snapshot(&ui_sender, player_filter.as_deref()) {
+            return;
+        }
     }
 }
 
-fn publish_snapshot(ui_sender: &Sender<BackendUpdate>, player_filter: Option<&str>) {
+fn publish_snapshot(ui_sender: &Sender<BackendUpdate>, player_filter: Option<&str>) -> bool {
     let update = match query_active_player_metadata(player_filter) {
         Ok(snapshot) => BackendUpdate::Snapshot(snapshot),
         Err(err) => BackendUpdate::Error(err),
     };
 
-    let _ = ui_sender.send(update);
+    ui_sender.send(update).is_ok()
 }
 
 fn start_name_owner_listener(trigger_tx: Sender<()>) {
@@ -88,8 +92,8 @@ fn start_name_owner_listener(trigger_tx: Sender<()>) {
         };
 
         for signal in &mut signals {
-            if name_owner_changed_is_mpris(&signal) {
-                let _ = trigger_tx.send(());
+            if name_owner_changed_is_mpris(&signal) && trigger_tx.send(()).is_err() {
+                return;
             }
         }
     });
@@ -126,8 +130,8 @@ fn start_properties_listener(trigger_tx: Sender<()>) {
                 continue;
             };
 
-            if is_mpris_properties_changed(&message) {
-                let _ = trigger_tx.send(());
+            if is_mpris_properties_changed(&message) && trigger_tx.send(()).is_err() {
+                return;
             }
         }
     });

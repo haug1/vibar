@@ -311,8 +311,13 @@ pub(super) fn install_carousel_animation(carousel: PlayerctlCarouselUi) {
     const END_HOLD_MS: u64 = 700;
     const RESTART_HOLD_MS: u64 = 700;
 
+    let area_weak = carousel.area.downgrade();
     glib::timeout_add_local(Duration::from_millis(24), move || {
-        if !carousel.area.is_mapped() {
+        let Some(area) = area_weak.upgrade() else {
+            return ControlFlow::Break;
+        };
+
+        if !area.is_mapped() {
             return ControlFlow::Continue;
         }
         if matches!(carousel.marquee, PlayerctlMarqueeMode::Off) {
@@ -377,7 +382,7 @@ pub(super) fn install_carousel_animation(carousel: PlayerctlCarouselUi) {
         }
 
         if should_redraw {
-            carousel.area.queue_draw();
+            area.queue_draw();
         }
 
         if should_return_early {
