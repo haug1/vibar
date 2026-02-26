@@ -117,8 +117,8 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
         move || run_event_backend(sender, player)
     });
 
+    let root_weak = root.downgrade();
     glib::timeout_add_local(Duration::from_millis(200), {
-        let root = root.clone();
         let label = label.clone();
         let format = config.format.clone();
         let no_player_text = config.no_player_text.clone();
@@ -128,6 +128,9 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
         let carousel = carousel.clone();
         let tooltip_ui = tooltip_ui.clone();
         move || {
+            let Some(root) = root_weak.upgrade() else {
+                return ControlFlow::Break;
+            };
             while let Ok(update) = receiver.try_recv() {
                 let (plain_text, markup_text, visibility, state_class) = match update {
                     BackendUpdate::Snapshot(Some(metadata)) => {
