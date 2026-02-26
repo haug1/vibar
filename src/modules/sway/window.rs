@@ -95,14 +95,17 @@ fn build_window_module(
     start_window_event_listener(signal_tx);
     refresh_window(&label, output_filter.as_deref(), &format);
 
+    let label_weak = label.downgrade();
     glib::source::unix_fd_add_local(
         signal_rx.as_raw_fd(),
         glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
         {
-            let label = label.clone();
             let output_filter = output_filter.clone();
             let format = format.clone();
             move |_, condition| {
+                let Some(label) = label_weak.upgrade() else {
+                    return ControlFlow::Break;
+                };
                 if condition.intersects(glib::IOCondition::HUP | glib::IOCondition::ERR) {
                     return ControlFlow::Break;
                 }

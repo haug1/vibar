@@ -95,15 +95,18 @@ pub(crate) fn build_workspaces_module(
         button_class.as_deref(),
     );
 
+    let container_weak = container.downgrade();
     // Refresh only when the sway listener emits an event callback signal.
     glib::source::unix_fd_add_local(
         signal_rx.as_raw_fd(),
         glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
         {
-            let container = container.clone();
             let output_filter = output_filter.clone();
             let button_class = button_class.clone();
             move |_, condition| {
+                let Some(container) = container_weak.upgrade() else {
+                    return ControlFlow::Break;
+                };
                 if condition.intersects(glib::IOCondition::HUP | glib::IOCondition::ERR) {
                     if workspace_debug_enabled() {
                         eprintln!("vibar/workspaces: event signal pipe closed");
