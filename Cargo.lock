@@ -440,7 +440,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "debb0d39e3cdd84626edfd54d6e4a6ba2da9a0ef2e796e691c4e9f8646fda00c"
 dependencies = [
  "gdk-pixbuf-sys",
- "gio",
+ "gio 0.21.5",
  "glib 0.21.5",
  "libc",
 ]
@@ -467,7 +467,7 @@ dependencies = [
  "cairo-rs",
  "gdk-pixbuf",
  "gdk4-sys",
- "gio",
+ "gio 0.21.5",
  "gl",
  "glib 0.21.5",
  "libc",
@@ -516,6 +516,23 @@ dependencies = [
  "futures-util",
  "gio-sys 0.21.5",
  "glib 0.21.5",
+ "libc",
+ "pin-project-lite",
+ "smallvec",
+]
+
+[[package]]
+name = "gio"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb018ae3f3967134a833fac8a2568c3e698f4b95c658865360772d73803cc5de"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-io",
+ "futures-util",
+ "gio-sys 0.22.0",
+ "glib 0.22.0",
  "libc",
  "pin-project-lite",
  "smallvec",
@@ -741,7 +758,7 @@ dependencies = [
  "futures-channel",
  "gdk-pixbuf",
  "gdk4",
- "gio",
+ "gio 0.21.5",
  "glib 0.21.5",
  "graphene-rs",
  "gsk4",
@@ -1052,7 +1069,7 @@ version = "0.21.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1d85e2078077a065bb7fc072783d5bcd4e51b379f22d67107d0a16937eb69"
 dependencies = [
- "gio",
+ "gio 0.21.5",
  "glib 0.21.5",
  "libc",
  "pango-sys",
@@ -1511,7 +1528,7 @@ name = "vibar"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "gio",
+ "gio 0.22.1",
  "glib 0.22.0",
  "gtk4",
  "gtk4-layer-shell",
