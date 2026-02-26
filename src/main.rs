@@ -37,6 +37,13 @@ fn main() {
             let connector = monitor.connector().map(|value| value.to_string());
             debug_dump_dom_if_enabled(&window, connector.as_deref());
             window.present();
+
+            monitor.connect_invalidate({
+                let window = window.clone();
+                move |_monitor| {
+                    window.close();
+                }
+            });
         }
     });
 
