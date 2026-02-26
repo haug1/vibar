@@ -201,6 +201,10 @@ fn run_battery_backend_loop(
     format_icons: Vec<String>,
     interval_secs: u32,
 ) {
+    if label_weak.upgrade().is_none() {
+        return;
+    }
+
     let resync_interval = Duration::from_secs(u64::from(interval_secs));
     let mut last_resync = Instant::now();
     let mut backend = BatteryBackend::new(preferred_device);
@@ -220,6 +224,10 @@ fn run_battery_backend_loop(
     );
 
     loop {
+        if label_weak.upgrade().is_none() {
+            return;
+        }
+
         let wake_timeout =
             millis_until_next_resync(last_resync, resync_interval).min(BACKEND_WAKE_POLL_MILLIS);
 
