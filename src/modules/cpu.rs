@@ -139,14 +139,19 @@ pub(crate) fn build_cpu_module(
                 },
             };
 
-            let _ = sender.send(update);
+            if sender.send(update).is_err() {
+                return;
+            }
             std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
         }
     });
 
+    let label_weak = label.downgrade();
     glib::timeout_add_local(Duration::from_millis(200), {
-        let label = label.clone();
         move || {
+            let Some(label) = label_weak.upgrade() else {
+                return ControlFlow::Break;
+            };
             while let Ok(update) = receiver.try_recv() {
                 let visible = !update.text.trim().is_empty();
                 label.set_visible(visible);
