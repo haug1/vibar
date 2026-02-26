@@ -12,6 +12,7 @@ pub(crate) mod sway;
 pub(crate) mod temperature;
 pub(crate) mod tray;
 
+use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{GestureClick, Widget};
 use serde::Deserialize;
@@ -20,6 +21,7 @@ use serde_json::{Map, Value};
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ModuleBuildContext {
     pub(crate) monitor_connector: Option<String>,
+    pub(crate) monitor: Option<gdk::Monitor>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
