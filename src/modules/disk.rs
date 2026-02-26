@@ -1,7 +1,7 @@
 use std::process::Command;
 use std::time::Duration;
 
-use glib::ControlFlow;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
@@ -130,7 +130,7 @@ pub(crate) fn build_disk_module(
     });
 
     let label_weak = label.downgrade();
-    glib::timeout_add_local(Duration::from_millis(200), {
+    gtk::glib::timeout_add_local(Duration::from_millis(200), {
         move || {
             let Some(label) = label_weak.upgrade() else {
                 return ControlFlow::Break;

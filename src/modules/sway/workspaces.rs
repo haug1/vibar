@@ -3,8 +3,8 @@ use std::os::fd::AsRawFd;
 use std::process::Command;
 use std::{cell::RefCell, rc::Rc};
 
-use glib::ControlFlow;
 use gtk::gdk;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, Orientation, Widget};
 use serde::Deserialize;
@@ -112,9 +112,9 @@ pub(crate) fn build_workspaces_module(
 
     let container_weak = container.downgrade();
     // Refresh only when the sway listener emits an event callback signal.
-    glib::source::unix_fd_add_local(
+    gtk::glib::source::unix_fd_add_local(
         signal_rx.as_raw_fd(),
-        glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
+        gtk::glib::IOCondition::IN | gtk::glib::IOCondition::HUP | gtk::glib::IOCondition::ERR,
         {
             let resolved_output = Rc::clone(&resolved_output);
             let monitor = monitor.clone();
@@ -123,7 +123,7 @@ pub(crate) fn build_workspaces_module(
                 let Some(container) = container_weak.upgrade() else {
                     return ControlFlow::Break;
                 };
-                if condition.intersects(glib::IOCondition::HUP | glib::IOCondition::ERR) {
+                if condition.intersects(gtk::glib::IOCondition::HUP | gtk::glib::IOCondition::ERR) {
                     if workspace_debug_enabled() {
                         eprintln!("vibar/workspaces: event signal pipe closed");
                     }
@@ -166,7 +166,7 @@ pub(crate) fn build_workspaces_module(
         },
     );
 
-    glib::timeout_add_local(std::time::Duration::from_millis(200), {
+    gtk::glib::timeout_add_local(std::time::Duration::from_millis(200), {
         let container_weak = container.downgrade();
         let resolved_output = Rc::clone(&resolved_output);
         let monitor = monitor.clone();

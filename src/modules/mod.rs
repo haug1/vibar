@@ -116,7 +116,7 @@ pub(crate) fn apply_css_classes(widget: &impl IsA<Widget>, classes: Option<&str>
 }
 
 pub(crate) fn escape_markup_text(text: &str) -> String {
-    glib::markup_escape_text(text).to_string()
+    gtk::glib::markup_escape_text(text).to_string()
 }
 
 pub(crate) fn render_markup_template(template: &str, replacements: &[(&str, &str)]) -> String {

@@ -92,7 +92,12 @@ fn start_name_owner_listener(trigger_tx: Sender<()>) {
         };
 
         for signal in &mut signals {
-            if name_owner_changed_is_mpris(&signal) && trigger_tx.send(()).is_err() {
+            let is_mpris = signal
+                .args()
+                .ok()
+                .map(|args| args.name().starts_with(MPRIS_PREFIX))
+                .unwrap_or(false);
+            if is_mpris && trigger_tx.send(()).is_err() {
                 return;
             }
         }
@@ -147,14 +152,6 @@ fn is_mpris_properties_changed(message: &zbus::Message) -> bool {
     };
 
     interface_name == MPRIS_PLAYER_INTERFACE || interface_name == MPRIS_ROOT_INTERFACE
-}
-
-fn name_owner_changed_is_mpris(signal: &zbus::blocking::fdo::NameOwnerChanged) -> bool {
-    signal
-        .args()
-        .ok()
-        .map(|args| args.name().starts_with(MPRIS_PREFIX))
-        .unwrap_or(false)
 }
 
 fn query_active_player_metadata(

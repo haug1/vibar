@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use glib::ControlFlow;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{
     Box as GtkBox, Button, EventControllerScroll, EventControllerScrollFlags, GestureClick, Label,
@@ -347,16 +347,16 @@ fn build_pulseaudio_module(
                     increase: true,
                     step: scroll_step,
                 });
-                return glib::Propagation::Stop;
+                return gtk::glib::Propagation::Stop;
             }
             if dy > 0.0 {
                 let _ = worker_tx.send(WorkerCommand::VolumeStep {
                     increase: false,
                     step: scroll_step,
                 });
-                return glib::Propagation::Stop;
+                return gtk::glib::Propagation::Stop;
             }
-            glib::Propagation::Proceed
+            gtk::glib::Propagation::Proceed
         });
         label.add_controller(scroll);
     }
@@ -366,7 +366,7 @@ fn build_pulseaudio_module(
     std::thread::spawn(move || run_native_loop(ui_sender, worker_rx, render_config));
 
     let label_weak = label.downgrade();
-    glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
+    gtk::glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
         let controls_ui = controls_ui.clone();
         move || {
             let Some(label) = label_weak.upgrade() else {
