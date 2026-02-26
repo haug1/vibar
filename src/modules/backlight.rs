@@ -284,6 +284,10 @@ fn run_backlight_backend_loop(
     format_icons: Vec<String>,
     interval_secs: u32,
 ) {
+    if label_weak.upgrade().is_none() {
+        return;
+    }
+
     let resync_interval = Duration::from_secs(u64::from(interval_secs));
     let mut last_resync = Instant::now();
     let mut backend = BacklightBackend::new(preferred_device);
@@ -303,6 +307,10 @@ fn run_backlight_backend_loop(
     );
 
     loop {
+        if label_weak.upgrade().is_none() {
+            return;
+        }
+
         while let Ok(message) = control_rx.try_recv() {
             if let Err(err) = backend.apply_control_message(message) {
                 backend.last_error = Some(err);
