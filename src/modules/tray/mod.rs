@@ -114,11 +114,15 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
     });
 
     glib::timeout_add_local(Duration::from_millis(250), {
-        let container = container.clone();
+        let container_weak = container.downgrade();
         let mut current = Vec::<TrayItemSnapshot>::new();
         let mut rendered = HashMap::<String, RenderedTrayItem>::new();
 
         move || {
+            let Some(container) = container_weak.upgrade() else {
+                return ControlFlow::Break;
+            };
+
             let mut next = None;
             while let Ok(snapshot) = receiver.try_recv() {
                 next = Some(snapshot);
