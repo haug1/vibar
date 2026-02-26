@@ -225,10 +225,13 @@ fn debug_dump_dom_if_enabled(window: &ApplicationWindow, connector: Option<&str>
     dump_dom_snapshot(window, &monitor_name);
 
     let interval_secs = dom_debug_interval_secs();
+    let window_weak = window.downgrade();
     glib::timeout_add_local(Duration::from_secs(interval_secs), {
-        let window = window.clone();
         let monitor_name = monitor_name.clone();
         move || {
+            let Some(window) = window_weak.upgrade() else {
+                return ControlFlow::Break;
+            };
             dump_dom_snapshot(&window, &monitor_name);
             ControlFlow::Continue
         }
