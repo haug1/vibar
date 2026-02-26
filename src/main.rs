@@ -3,6 +3,9 @@ use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Box as GtkBox, CenterBox, Orientation};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::time::Duration;
 
 mod config;
@@ -24,23 +27,105 @@ fn main() {
             loaded_config.source_path.as_deref(),
         );
 
-        let monitors = connected_monitors();
-        if monitors.is_empty() {
-            let window = build_window(app, &loaded_config.config, None);
-            debug_dump_dom_if_enabled(&window, None);
-            window.present();
-            return;
-        }
+        let windows = Rc::new(RefCell::new(HashMap::new()));
+        sync_monitor_windows(app, &loaded_config.config, &windows);
 
-        for monitor in monitors {
-            let window = build_window(app, &loaded_config.config, Some(&monitor));
-            let connector = monitor.connector().map(|value| value.to_string());
-            debug_dump_dom_if_enabled(&window, connector.as_deref());
-            window.present();
-        }
+        let Some(display) = gdk::Display::default() else {
+            return;
+        };
+        let monitors = display.monitors();
+        monitors.connect_items_changed({
+            let app = app.clone();
+            let config = loaded_config.config.clone();
+            let windows = Rc::clone(&windows);
+            move |_, _, _, _| {
+                sync_monitor_windows(&app, &config, &windows);
+            }
+        });
     });
 
     app.run();
+}
+
+fn sync_monitor_windows(
+    app: &Application,
+    config: &Config,
+    windows: &Rc<RefCell<HashMap<String, ApplicationWindow>>>,
+) {
+    let monitors = connected_monitors();
+    let monitor_keys = monitors
+        .iter()
+        .map(|monitor| (monitor_key(monitor), monitor.clone()))
+        .collect::<Vec<_>>();
+    let active_keys = monitor_keys
+        .iter()
+        .map(|(key, _)| key.clone())
+        .collect::<HashSet<_>>();
+
+    let mut tracked_windows = windows.borrow_mut();
+    let mut removed_keys = tracked_windows
+        .keys()
+        .filter(|key| *key != FALLBACK_WINDOW_KEY && !active_keys.contains(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !monitor_keys.is_empty() && tracked_windows.contains_key(FALLBACK_WINDOW_KEY) {
+        removed_keys.push(FALLBACK_WINDOW_KEY.to_string());
+    }
+
+    let mut removed_windows = Vec::new();
+    for key in removed_keys {
+        if let Some(window) = tracked_windows.remove(&key) {
+            removed_windows.push(window);
+        }
+    }
+
+    if monitor_keys.is_empty() {
+        if !tracked_windows.contains_key(FALLBACK_WINDOW_KEY) {
+            let window = build_window(app, config, None);
+            debug_dump_dom_if_enabled(&window, None);
+            window.present();
+            tracked_windows.insert(FALLBACK_WINDOW_KEY.to_string(), window);
+        }
+        drop(tracked_windows);
+        defer_close_windows(removed_windows);
+        return;
+    }
+
+    for (key, monitor) in monitor_keys {
+        if tracked_windows.contains_key(&key) {
+            continue;
+        }
+        let window = build_window(app, config, Some(&monitor));
+        let connector = monitor.connector().map(|value| value.to_string());
+        debug_dump_dom_if_enabled(&window, connector.as_deref());
+        window.present();
+        tracked_windows.insert(key, window);
+    }
+
+    drop(tracked_windows);
+    defer_close_windows(removed_windows);
+}
+
+const FALLBACK_WINDOW_KEY: &str = "__fallback__";
+
+fn monitor_key(monitor: &gdk::Monitor) -> String {
+    let pointer = monitor.as_ptr();
+    if let Some(connector) = monitor.connector() {
+        return format!("connector:{connector}|ptr:{pointer:p}");
+    }
+    format!("ptr:{pointer:p}")
+}
+
+fn defer_close_windows(removed_windows: Vec<ApplicationWindow>) {
+    if removed_windows.is_empty() {
+        return;
+    }
+
+    glib::idle_add_local_once(move || {
+        for window in removed_windows {
+            window.close();
+        }
+    });
 }
 
 fn connected_monitors() -> Vec<gdk::Monitor> {

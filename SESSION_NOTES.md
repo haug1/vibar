@@ -16,7 +16,7 @@ Purpose: fast orientation for future coding sessions. Keep this concise and curr
 ## Core Behavior
 
 - Bottom-anchored layer-shell bar
-- One bar window per connected monitor at startup
+- One bar window per connected monitor, with runtime monitor hotplug sync
 - Non-focusable bar windows (`KeyboardMode::None`, no focus-on-click)
 - 3 layout areas: `left`, `center`, `right`
 - Config-driven module system (canonical reference: `docs/modules.md`)
