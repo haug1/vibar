@@ -257,27 +257,30 @@ fn subscribe_shared_exec_output(
         interval_secs,
     };
 
-    let backend = {
+    let (sender, receiver) = std::sync::mpsc::channel::<ExecRenderedOutput>();
+    let (backend, start_worker) = {
         let mut backends = shared_exec_backends()
             .lock()
             .expect("exec backend map mutex poisoned");
 
         if let Some(existing) = backends.get(&key) {
-            Arc::clone(existing)
+            (Arc::clone(existing), false)
         } else {
             let backend = Arc::new(SharedExecBackend::default());
-            start_shared_exec_worker(key.clone(), Arc::clone(&backend));
-            backends.insert(key, Arc::clone(&backend));
-            backend
+            backends.insert(key.clone(), Arc::clone(&backend));
+            (backend, true)
         }
     };
+
+    backend.add_subscriber(sender);
+    if start_worker {
+        start_shared_exec_worker(key.clone(), Arc::clone(&backend));
+    }
 
     if let Some(signum) = signal {
         register_exec_signal(signum, &backend);
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<ExecRenderedOutput>();
-    backend.add_subscriber(sender);
     receiver
 }
 
