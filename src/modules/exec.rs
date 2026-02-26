@@ -110,10 +110,13 @@ pub(crate) fn build_exec_module(
 
     let receiver = subscribe_shared_exec_output(command, format, effective_interval_secs, signal);
 
+    let label_weak = label.downgrade();
     glib::timeout_add_local(std::time::Duration::from_millis(200), {
-        let label = label.clone();
         let mut active_dynamic_classes: Vec<String> = Vec::new();
         move || {
+            let Some(label) = label_weak.upgrade() else {
+                return ControlFlow::Break;
+            };
             while let Ok(rendered) = receiver.try_recv() {
                 label.set_markup(&rendered.text);
                 label.set_visible(rendered.visible);
@@ -226,6 +229,13 @@ impl SharedExecBackend {
             let _ = sender.send(());
         }
     }
+
+    fn subscriber_count(&self) -> usize {
+        self.subscribers
+            .lock()
+            .expect("exec backend subscribers mutex poisoned")
+            .len()
+    }
 }
 
 type SharedExecMap = HashMap<ExecSharedKey, Arc<SharedExecBackend>>;
@@ -277,11 +287,27 @@ fn start_shared_exec_worker(key: ExecSharedKey, backend: Arc<SharedExecBackend>)
 
     std::thread::spawn(move || loop {
         backend.broadcast(run_exec_command(&key.command, &key.format));
+        if backend.subscriber_count() == 0 {
+            remove_shared_exec_backend_if_unused(&key, &backend);
+            unregister_exec_backend_signals(&backend);
+            return;
+        }
         match refresh_receiver.recv_timeout(Duration::from_secs(u64::from(key.interval_secs))) {
             Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
         }
     });
+}
+
+fn remove_shared_exec_backend_if_unused(key: &ExecSharedKey, backend: &Arc<SharedExecBackend>) {
+    let mut backends = shared_exec_backends()
+        .lock()
+        .expect("exec backend map mutex poisoned");
+    if let Some(existing) = backends.get(key) {
+        if Arc::ptr_eq(existing, backend) && backend.subscriber_count() == 0 {
+            backends.remove(key);
+        }
+    }
 }
 
 #[derive(Default)]
@@ -315,6 +341,27 @@ fn register_exec_signal(signum: i32, backend: &Arc<SharedExecBackend>) {
     if should_install {
         install_exec_signal_handler(signum);
     }
+}
+
+fn unregister_exec_backend_signals(backend: &Arc<SharedExecBackend>) {
+    let mut registry = exec_signal_registry()
+        .lock()
+        .expect("exec signal registry mutex poisoned");
+
+    for listeners in registry.signal_backends.values_mut() {
+        listeners.retain(|existing| !Arc::ptr_eq(existing, backend));
+    }
+    registry
+        .signal_backends
+        .retain(|_, listeners| !listeners.is_empty());
+    let active_signals = registry
+        .signal_backends
+        .keys()
+        .copied()
+        .collect::<HashSet<_>>();
+    registry
+        .registered_signals
+        .retain(|signal| active_signals.contains(signal));
 }
 
 fn notify_exec_signal(signum: i32) {
