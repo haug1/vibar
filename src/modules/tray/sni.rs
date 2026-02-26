@@ -232,8 +232,8 @@ fn start_name_owner_listener(trigger_tx: std::sync::mpsc::Sender<()>) {
             let name = args.name().to_string();
             // Refresh only for tray-related names to avoid turning generic DBus churn
             // into continuous tray snapshot rebuilds.
-            if is_tray_relevant_name(&name) {
-                let _ = trigger_tx.send(());
+            if is_tray_relevant_name(&name) && trigger_tx.send(()).is_err() {
+                return;
             }
         }
     });
@@ -278,8 +278,8 @@ fn start_watcher_item_listener(trigger_tx: std::sync::mpsc::Sender<()>, member: 
         };
 
         for message in iterator {
-            if message.is_ok() {
-                let _ = trigger_tx.send(());
+            if message.is_ok() && trigger_tx.send(()).is_err() {
+                return;
             }
         }
     });
@@ -320,8 +320,8 @@ fn start_item_properties_listener(trigger_tx: std::sync::mpsc::Sender<()>) {
             let Ok(message) = message else {
                 continue;
             };
-            if is_tray_item_properties_changed(&message) {
-                let _ = trigger_tx.send(());
+            if is_tray_item_properties_changed(&message) && trigger_tx.send(()).is_err() {
+                return;
             }
         }
     });
