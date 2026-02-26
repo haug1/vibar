@@ -115,16 +115,8 @@ Here's the configuration used for the example preview bar above:
   
   ```jsonc
   {
-  // App searches config in this order:
-  // 1) ~/.config/vibar/config.jsonc
-  // 2) ./config.jsonc
-  // If neither exists (or both are invalid), built-in defaults are used.
   "style": {
-    // Optional. Defaults to true.
-    // Set false to disable embedded default style.css.
     "load-default": true,
-    // Optional. User CSS loaded after default CSS (if enabled), so it can override.
-    // Relative paths are resolved from this config file's directory.
     "path": "~/.config/vibar/style.css",
   },
   "areas": {
@@ -185,10 +177,7 @@ Here's the configuration used for the example preview bar above:
         "type": "pulseaudio",
         "right-click": "pavucontrol",
         "controls": {
-          // Optional inline popup controls (default disabled):
           "enabled": true,
-          // "left-click" or "right-click" (default).
-          // If set to "left-click", the top-level `click` command is ignored.
           "open": "left-click",
         },
         "class": "v-square",
@@ -212,7 +201,6 @@ Here's the configuration used for the example preview bar above:
       {
         "type": "group",
         "drawer": {
-          // Waybar transition settings are not supported in vibar.
           "label-closed": "",
           "label-open": "",
           "start-open": false,
@@ -251,7 +239,6 @@ Here's the configuration used for the example preview bar above:
 
 ```css
 * {
-  /* `otf-font-awesome` is required to be installed for icons */
   font-family:
     FontAwesome,
     JetBrainsMono Nerd Font,
