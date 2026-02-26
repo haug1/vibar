@@ -84,7 +84,7 @@ make ci
 ## Features
 
 - Bottom-anchored layer-shell bar
-- One bar window per connected monitor at startup
+- One bar window per connected monitor, with hotplug add/remove sync
 - Configurable horizontal layout with `left`, `center`, `right` areas
 - Configurable module system (`docs/modules.md`)
 - Sway modules for workspaces, active mode, and active-window title (`sway/workspaces`, `sway/mode`, `sway/window`)
