@@ -95,6 +95,9 @@ fn sync_monitor_windows(
         if tracked_windows.contains_key(&key) {
             continue;
         }
+
+        attach_monitor_connector_resolve_once(&monitor, app, config, windows);
+
         let window = build_window(app, config, Some(&monitor));
         let connector = monitor.connector().map(|value| value.to_string());
         debug_dump_dom_if_enabled(&window, connector.as_deref());
@@ -114,6 +117,39 @@ fn monitor_key(monitor: &gdk::Monitor) -> String {
         return format!("connector:{connector}|ptr:{pointer:p}");
     }
     format!("ptr:{pointer:p}")
+}
+
+fn attach_monitor_connector_resolve_once(
+    monitor: &gdk::Monitor,
+    app: &Application,
+    config: &Config,
+    windows: &Rc<RefCell<HashMap<String, ApplicationWindow>>>,
+) {
+    if monitor.connector().is_some() {
+        return;
+    }
+
+    let monitor = monitor.clone();
+    let handler_id = Rc::new(RefCell::new(None));
+    let handler_id_for_cb = Rc::clone(&handler_id);
+    let monitor_for_cb = monitor.clone();
+    let id = monitor.connect_connector_notify({
+        let app = app.clone();
+        let config = config.clone();
+        let windows = Rc::clone(windows);
+        move |item| {
+            if item.connector().is_none() {
+                return;
+            }
+
+            sync_monitor_windows(&app, &config, &windows);
+
+            if let Some(id) = handler_id_for_cb.borrow_mut().take() {
+                monitor_for_cb.disconnect(id);
+            }
+        }
+    });
+    *handler_id.borrow_mut() = Some(id);
 }
 
 fn defer_close_windows(removed_windows: Vec<ApplicationWindow>) {
@@ -191,6 +227,7 @@ fn build_window(
         monitor_connector: monitor
             .and_then(|item| item.connector())
             .map(|connector| connector.to_string()),
+        monitor: monitor.cloned(),
     };
 
     build_area(&left, &config.areas.left, &context);

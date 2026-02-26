@@ -1,8 +1,10 @@
 use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::process::Command;
+use std::{cell::RefCell, rc::Rc};
 
 use glib::ControlFlow;
+use gtk::gdk;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, Orientation, Widget};
 use serde::Deserialize;
@@ -33,6 +35,7 @@ impl ModuleFactory for SwayWorkspaceFactory {
         let parsed = parse_config(config)?;
         Ok(build_workspaces_module(
             context.monitor_connector.clone(),
+            context.monitor.clone(),
             parsed.class,
             parsed.button_class,
         )
@@ -58,9 +61,13 @@ fn parse_config(module: &ModuleConfig) -> Result<WorkspaceConfig, String> {
 
 pub(crate) fn build_workspaces_module(
     output_filter: Option<String>,
+    monitor: Option<gdk::Monitor>,
     class: Option<String>,
     button_class: Option<String>,
 ) -> GtkBox {
+    let resolved_output = Rc::new(RefCell::new(output_filter));
+    try_resolve_output_filter(&resolved_output, monitor.as_ref());
+
     let container = GtkBox::new(Orientation::Horizontal, 4);
     container.add_css_class("module");
     container.add_css_class("workspaces");
@@ -70,30 +77,38 @@ pub(crate) fn build_workspaces_module(
         Ok(pair) => pair,
         Err(err) => {
             eprintln!("vibar/workspaces: failed to create event signal pipe: {err}");
-            refresh_workspaces(
-                &container,
-                output_filter.as_deref(),
-                button_class.as_deref(),
-            );
+            let output = resolved_output.borrow().clone();
+            if output.is_some() {
+                refresh_workspaces(&container, output.as_deref(), button_class.as_deref());
+                container.set_visible(true);
+            } else {
+                container.set_visible(false);
+            }
             return container;
         }
     };
     if let Err(err) = signal_rx.set_nonblocking(true) {
         eprintln!("vibar/workspaces: failed to set nonblocking event signal pipe: {err}");
-        refresh_workspaces(
-            &container,
-            output_filter.as_deref(),
-            button_class.as_deref(),
-        );
+        let output = resolved_output.borrow().clone();
+        if output.is_some() {
+            refresh_workspaces(&container, output.as_deref(), button_class.as_deref());
+            container.set_visible(true);
+        } else {
+            container.set_visible(false);
+        }
         return container;
     }
 
     start_workspace_event_listener(signal_tx);
-    refresh_workspaces(
-        &container,
-        output_filter.as_deref(),
-        button_class.as_deref(),
-    );
+    {
+        let output = resolved_output.borrow().clone();
+        if output.is_some() {
+            refresh_workspaces(&container, output.as_deref(), button_class.as_deref());
+            container.set_visible(true);
+        } else {
+            container.set_visible(false);
+        }
+    }
 
     let container_weak = container.downgrade();
     // Refresh only when the sway listener emits an event callback signal.
@@ -101,7 +116,8 @@ pub(crate) fn build_workspaces_module(
         signal_rx.as_raw_fd(),
         glib::IOCondition::IN | glib::IOCondition::HUP | glib::IOCondition::ERR,
         {
-            let output_filter = output_filter.clone();
+            let resolved_output = Rc::clone(&resolved_output);
+            let monitor = monitor.clone();
             let button_class = button_class.clone();
             move |_, condition| {
                 let Some(container) = container_weak.upgrade() else {
@@ -134,18 +150,58 @@ pub(crate) fn build_workspaces_module(
                 }
 
                 if had_event {
-                    refresh_workspaces(
-                        &container,
-                        output_filter.as_deref(),
-                        button_class.as_deref(),
-                    );
+                    if resolved_output.borrow().is_none() {
+                        try_resolve_output_filter(&resolved_output, monitor.as_ref());
+                    }
+                    let output = resolved_output.borrow().clone();
+                    if output.is_none() {
+                        container.set_visible(false);
+                        return ControlFlow::Continue;
+                    }
+                    refresh_workspaces(&container, output.as_deref(), button_class.as_deref());
+                    container.set_visible(true);
                 }
                 ControlFlow::Continue
             }
         },
     );
 
+    glib::timeout_add_local(std::time::Duration::from_millis(200), {
+        let container_weak = container.downgrade();
+        let resolved_output = Rc::clone(&resolved_output);
+        let monitor = monitor.clone();
+        let button_class = button_class.clone();
+        move || {
+            let Some(container) = container_weak.upgrade() else {
+                return ControlFlow::Break;
+            };
+
+            if resolved_output.borrow().is_none() {
+                try_resolve_output_filter(&resolved_output, monitor.as_ref());
+                let output = resolved_output.borrow().clone();
+                if output.is_some() {
+                    refresh_workspaces(&container, output.as_deref(), button_class.as_deref());
+                    container.set_visible(true);
+                }
+            }
+
+            ControlFlow::Break
+        }
+    });
+
     container
+}
+
+fn try_resolve_output_filter(
+    resolved_output: &Rc<RefCell<Option<String>>>,
+    monitor: Option<&gdk::Monitor>,
+) {
+    if resolved_output.borrow().is_some() {
+        return;
+    }
+    if let Some(connector) = monitor.and_then(|item| item.connector()) {
+        *resolved_output.borrow_mut() = Some(connector.to_string());
+    }
 }
 
 fn start_workspace_event_listener(mut signal_tx: std::os::unix::net::UnixStream) {
