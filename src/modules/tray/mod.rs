@@ -6,8 +6,8 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use glib::ControlFlow;
 use gtk::gdk::{MemoryFormat, MemoryTexture, Texture};
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, GestureClick, IconLookupFlags, Image, Orientation, Widget};
 use serde_json::Value;
@@ -113,7 +113,7 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
         }
     });
 
-    glib::timeout_add_local(Duration::from_millis(250), {
+    gtk::glib::timeout_add_local(Duration::from_millis(250), {
         let container_weak = container.downgrade();
         let mut current = Vec::<TrayItemSnapshot>::new();
         let mut rendered = HashMap::<String, RenderedTrayItem>::new();
@@ -243,7 +243,7 @@ fn image_for_item(item: &TrayItemSnapshot, icon_size: i32) -> Image {
     if !item.icon_name.is_empty() {
         let icon_path = Path::new(&item.icon_name);
         if icon_path.is_absolute() {
-            let icon_file = gio::File::for_path(icon_path);
+            let icon_file = gtk::gio::File::for_path(icon_path);
             if let Ok(texture) = Texture::from_file(&icon_file) {
                 return Image::from_paintable(Some(&texture));
             }
@@ -252,7 +252,7 @@ fn image_for_item(item: &TrayItemSnapshot, icon_size: i32) -> Image {
         if icon_path.components().count() > 1 {
             for base in icon_theme_paths(item.icon_theme_path.as_deref()) {
                 let candidate = base.join(icon_path);
-                let icon_file = gio::File::for_path(candidate);
+                let icon_file = gtk::gio::File::for_path(candidate);
                 if let Ok(texture) = Texture::from_file(&icon_file) {
                     return Image::from_paintable(Some(&texture));
                 }
@@ -318,7 +318,7 @@ fn image_from_icon_pixmap(pixmap: &TrayIconPixmap) -> Option<Image> {
     }
 
     let rowstride = i32::try_from(width.checked_mul(4)?).ok()?;
-    let bytes = glib::Bytes::from_owned(rgba);
+    let bytes = gtk::glib::Bytes::from_owned(rgba);
     let texture = MemoryTexture::new(
         pixmap.width,
         pixmap.height,
@@ -371,7 +371,7 @@ fn image_from_icon_theme(
         }
 
         if let Some(path) = file.as_ref() {
-            let icon_file = gio::File::for_path(path);
+            let icon_file = gtk::gio::File::for_path(path);
             match Texture::from_file(&icon_file) {
                 Ok(texture) => return Some(Image::from_paintable(Some(&texture))),
                 Err(_) => continue,

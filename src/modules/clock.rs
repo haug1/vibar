@@ -1,5 +1,5 @@
 use chrono::Local;
-use glib::ControlFlow;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
@@ -104,7 +104,7 @@ pub(crate) fn build_clock_module(
     update();
 
     let label_weak = label.downgrade();
-    glib::timeout_add_seconds_local(1, move || {
+    gtk::glib::timeout_add_seconds_local(1, move || {
         let Some(label) = label_weak.upgrade() else {
             return ControlFlow::Break;
         };

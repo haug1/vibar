@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use glib::ControlFlow;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{
     Box as GtkBox, Button, DrawingArea, EventControllerMotion, GestureClick, Grid, Label,
@@ -312,7 +312,7 @@ pub(super) fn install_carousel_animation(carousel: PlayerctlCarouselUi) {
     const RESTART_HOLD_MS: u64 = 700;
 
     let area_weak = carousel.area.downgrade();
-    glib::timeout_add_local(Duration::from_millis(24), move || {
+    gtk::glib::timeout_add_local(Duration::from_millis(24), move || {
         let Some(area) = area_weak.upgrade() else {
             return ControlFlow::Break;
         };

@@ -6,7 +6,7 @@ mod ui;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use glib::ControlFlow;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Overlay, Widget};
 use serde_json::Value;
@@ -118,7 +118,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
     });
 
     let root_weak = root.downgrade();
-    glib::timeout_add_local(Duration::from_millis(200), {
+    gtk::glib::timeout_add_local(Duration::from_millis(200), {
         let label = label.clone();
         let format = config.format.clone();
         let no_player_text = config.no_player_text.clone();

@@ -188,8 +188,8 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
         );
     }
 
-    let main_context = glib::MainContext::default();
-    let label_weak = glib::SendWeakRef::from(label.downgrade());
+    let main_context = gtk::glib::MainContext::default();
+    let label_weak = gtk::glib::SendWeakRef::from(label.downgrade());
 
     let (control_tx, control_rx) = mpsc::channel::<BacklightControlMessage>();
 
@@ -224,15 +224,15 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
                     if let Some(command) = up_command.as_ref() {
                         spawn_shell_command(command);
                     }
-                    return glib::Propagation::Stop;
+                    return gtk::glib::Propagation::Stop;
                 }
                 if dy > 0.0 {
                     if let Some(command) = down_command.as_ref() {
                         spawn_shell_command(command);
                     }
-                    return glib::Propagation::Stop;
+                    return gtk::glib::Propagation::Stop;
                 }
-                glib::Propagation::Proceed
+                gtk::glib::Propagation::Proceed
             });
         } else if scroll_step > 0.0 {
             let clamped_min_brightness = min_brightness.clamp(0.0, 100.0);
@@ -243,7 +243,7 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
                         step_percent: scroll_step,
                         min_percent: clamped_min_brightness,
                     });
-                    return glib::Propagation::Stop;
+                    return gtk::glib::Propagation::Stop;
                 }
                 if dy > 0.0 {
                     let _ = control_tx.send(BacklightControlMessage::AdjustByPercent {
@@ -251,9 +251,9 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
                         step_percent: scroll_step,
                         min_percent: clamped_min_brightness,
                     });
-                    return glib::Propagation::Stop;
+                    return gtk::glib::Propagation::Stop;
                 }
-                glib::Propagation::Proceed
+                gtk::glib::Propagation::Proceed
             });
         }
 
@@ -276,8 +276,8 @@ fn apply_backlight_ui_update(label: &Label, update: &BacklightUiUpdate) {
 }
 
 fn run_backlight_backend_loop(
-    main_context: glib::MainContext,
-    label_weak: glib::SendWeakRef<Label>,
+    main_context: gtk::glib::MainContext,
+    label_weak: gtk::glib::SendWeakRef<Label>,
     control_rx: Receiver<BacklightControlMessage>,
     format: String,
     preferred_device: Option<String>,
@@ -361,8 +361,8 @@ fn run_backlight_backend_loop(
 }
 
 fn dispatch_backlight_ui_update(
-    main_context: &glib::MainContext,
-    label_weak: &glib::SendWeakRef<Label>,
+    main_context: &gtk::glib::MainContext,
+    label_weak: &gtk::glib::SendWeakRef<Label>,
     update: BacklightUiUpdate,
 ) {
     let label_weak = label_weak.clone();

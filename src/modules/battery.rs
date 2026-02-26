@@ -160,8 +160,8 @@ pub(crate) fn build_battery_module(
         );
     }
 
-    let main_context = glib::MainContext::default();
-    let label_weak = glib::SendWeakRef::from(label.downgrade());
+    let main_context = gtk::glib::MainContext::default();
+    let label_weak = gtk::glib::SendWeakRef::from(label.downgrade());
     std::thread::spawn(move || {
         run_battery_backend_loop(
             main_context,
@@ -194,8 +194,8 @@ fn apply_battery_ui_update(label: &Label, update: &BatteryUiUpdate) {
 }
 
 fn run_battery_backend_loop(
-    main_context: glib::MainContext,
-    label_weak: glib::SendWeakRef<Label>,
+    main_context: gtk::glib::MainContext,
+    label_weak: gtk::glib::SendWeakRef<Label>,
     format: String,
     preferred_device: Option<String>,
     format_icons: Vec<String>,
@@ -266,8 +266,8 @@ fn run_battery_backend_loop(
 }
 
 fn dispatch_battery_ui_update(
-    main_context: &glib::MainContext,
-    label_weak: &glib::SendWeakRef<Label>,
+    main_context: &gtk::glib::MainContext,
+    label_weak: &gtk::glib::SendWeakRef<Label>,
     update: BatteryUiUpdate,
 ) {
     let label_weak = label_weak.clone();

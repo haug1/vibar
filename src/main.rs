@@ -1,5 +1,5 @@
-use glib::ControlFlow;
 use gtk::gdk;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow, Box as GtkBox, CenterBox, Orientation};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
@@ -157,7 +157,7 @@ fn defer_close_windows(removed_windows: Vec<ApplicationWindow>) {
         return;
     }
 
-    glib::idle_add_local_once(move || {
+    gtk::glib::idle_add_local_once(move || {
         for window in removed_windows {
             window.close();
         }
@@ -263,7 +263,7 @@ fn debug_dump_dom_if_enabled(window: &ApplicationWindow, connector: Option<&str>
 
     let interval_secs = dom_debug_interval_secs();
     let window_weak = window.downgrade();
-    glib::timeout_add_local(Duration::from_secs(interval_secs), {
+    gtk::glib::timeout_add_local(Duration::from_secs(interval_secs), {
         let monitor_name = monitor_name.clone();
         move || {
             let Some(window) = window_weak.upgrade() else {

@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use glib::ControlFlow;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Align, Label, Widget};
 use serde::Deserialize;
@@ -111,7 +111,7 @@ pub(crate) fn build_exec_module(
     let receiver = subscribe_shared_exec_output(command, format, effective_interval_secs, signal);
 
     let label_weak = label.downgrade();
-    glib::timeout_add_local(std::time::Duration::from_millis(200), {
+    gtk::glib::timeout_add_local(std::time::Duration::from_millis(200), {
         let mut active_dynamic_classes: Vec<String> = Vec::new();
         move || {
             let Some(label) = label_weak.upgrade() else {
@@ -409,7 +409,7 @@ fn ensure_exec_signal_dispatch_ready() {
         let write_fd = fds[1];
         EXEC_SIGNAL_PIPE_WRITE_FD.store(write_fd, Ordering::Relaxed);
 
-        glib::source::unix_fd_add_local(read_fd, glib::IOCondition::IN, move |_, _| {
+        gtk::glib::source::unix_fd_add_local(read_fd, gtk::glib::IOCondition::IN, move |_, _| {
             drain_exec_signal_pipe(read_fd);
             ControlFlow::Continue
         });
