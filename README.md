@@ -69,6 +69,11 @@ Run CI-equivalent checks:
 make ci
 ```
 
+## Dependency Automation
+
+- Dependabot checks Rust (`cargo`) and GitHub Actions dependencies weekly.
+- Dependabot PRs are configured to auto-merge when repository checks pass.
+
 ## Documentation
 
 - Module configuration and styling selectors: [`docs/modules.md`](./docs/modules.md)
