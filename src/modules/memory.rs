@@ -109,13 +109,18 @@ pub(crate) fn build_memory_module(
             Ok(status) => render_format(&poll_format, &status),
             Err(err) => escape_markup_text(&format!("memory error: {err}")),
         };
-        let _ = sender.send(text);
+        if sender.send(text).is_err() {
+            return;
+        }
         std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
     });
 
+    let label_weak = label.downgrade();
     glib::timeout_add_local(Duration::from_millis(200), {
-        let label = label.clone();
         move || {
+            let Some(label) = label_weak.upgrade() else {
+                return ControlFlow::Break;
+            };
             while let Ok(text) = receiver.try_recv() {
                 let visible = !text.trim().is_empty();
                 label.set_visible(visible);
