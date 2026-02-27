@@ -9,10 +9,10 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use swayipc::{Connection, EventType};
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
-use crate::modules::{
-    apply_css_classes, poll_receiver_widget, ModuleBuildContext, ModuleConfig, ModuleFactory,
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
+use crate::modules::{apply_css_classes, ModuleBuildContext, ModuleConfig, ModuleFactory};
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub(crate) struct WorkspaceConfig {
@@ -85,7 +85,7 @@ fn workspaces_registry(
     REGISTRY.get_or_init(BackendRegistry::new)
 }
 
-fn subscribe_shared_workspaces() -> std::sync::mpsc::Receiver<WorkspacesUpdate> {
+fn subscribe_shared_workspaces() -> Subscription<WorkspacesUpdate> {
     let key = WorkspacesSharedKey {};
 
     let (broadcaster, start_worker) =
@@ -213,7 +213,7 @@ pub(crate) fn build_workspaces_module(
     container.add_css_class("workspaces");
     apply_css_classes(&container, class.as_deref());
 
-    let receiver = subscribe_shared_workspaces();
+    let subscription = subscribe_shared_workspaces();
 
     // Initial render
     {
@@ -225,7 +225,7 @@ pub(crate) fn build_workspaces_module(
         }
     }
 
-    poll_receiver_widget(&container, receiver, {
+    attach_subscription(&container, subscription, {
         let resolved_output = Rc::clone(&resolved_output);
         let monitor = monitor.clone();
         move |container, update| {

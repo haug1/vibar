@@ -12,10 +12,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use zbus::blocking::{Connection, Proxy};
 
-use crate::modules::broadcaster::BackendRegistry;
+use crate::modules::broadcaster::{attach_subscription, BackendRegistry, Subscription};
 use crate::modules::{
-    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
-    ModuleLabel,
+    escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -184,7 +183,7 @@ fn subscribe_shared_backlight(
     config: &BacklightConfig,
     effective_interval_secs: u32,
 ) -> (
-    std::sync::mpsc::Receiver<BacklightUiUpdate>,
+    Subscription<BacklightUiUpdate>,
     Sender<BacklightControlMessage>,
 ) {
     let format = config
@@ -274,9 +273,10 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
         );
     }
 
-    let (ui_rx, control_tx) = subscribe_shared_backlight(&config, effective_interval_secs);
+    let (ui_subscription, control_tx) =
+        subscribe_shared_backlight(&config, effective_interval_secs);
 
-    poll_receiver(&label, ui_rx, |label, update| {
+    attach_subscription(&label, ui_subscription, |label, update| {
         apply_backlight_ui_update(label, &update);
     });
 

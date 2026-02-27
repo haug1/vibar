@@ -6,10 +6,12 @@ use serde::Deserialize;
 use serde_json::Value;
 use swayipc::{Connection, EventType, Node, NodeType};
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, poll_receiver,
-    render_markup_template, ModuleBuildContext, ModuleConfig, ModuleFactory,
+    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
+    ModuleBuildContext, ModuleConfig, ModuleFactory,
 };
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -81,7 +83,7 @@ fn window_registry() -> &'static BackendRegistry<WindowSharedKey, Broadcaster<Wi
     REGISTRY.get_or_init(BackendRegistry::new)
 }
 
-fn subscribe_shared_window(format: String) -> std::sync::mpsc::Receiver<WindowUpdate> {
+fn subscribe_shared_window(format: String) -> Subscription<WindowUpdate> {
     let key = WindowSharedKey {
         format: format.clone(),
     };
@@ -198,9 +200,9 @@ fn build_window_module(
     apply_css_classes(&label, class.as_deref());
     attach_primary_click_command(&label, click_command);
 
-    let receiver = subscribe_shared_window(format);
+    let subscription = subscribe_shared_window(format);
 
-    poll_receiver(&label, receiver, move |label, update| {
+    attach_subscription(&label, subscription, move |label, update| {
         let belongs_to_output = match (output_filter.as_deref(), update.output.as_deref()) {
             (Some(expected), Some(current)) => expected == current,
             (Some(_), None) => false,

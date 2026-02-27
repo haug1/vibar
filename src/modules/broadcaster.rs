@@ -1,15 +1,47 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
+
+use gtk::glib;
+use gtk::glib::IOCondition;
+use gtk::prelude::*;
 
 /// Fan-out broadcaster that sends updates to multiple subscribers.
 ///
-/// Each subscriber receives updates via a standard mpsc channel.
-/// New subscribers immediately receive the latest cached value (if any).
-/// Dead subscribers are pruned on each broadcast.
+/// Each subscriber receives updates via an mpsc channel paired with a unix
+/// pipe for event-driven wakeup.  The pipe integrates with the GTK main loop
+/// via `unix_fd_add_local` — callbacks fire only when data arrives, with zero
+/// polling overhead.
 pub(crate) struct Broadcaster<U: Clone + Send> {
     latest: Mutex<Option<U>>,
-    pub(crate) subscribers: Mutex<Vec<std::sync::mpsc::Sender<U>>>,
+    subscribers: Mutex<Vec<SubscriberSlot<U>>>,
+}
+
+struct SubscriberSlot<U> {
+    sender: std::sync::mpsc::Sender<U>,
+    /// Write-end of the notification pipe.  A single byte is written on
+    /// each broadcast to wake the GTK main loop via `unix_fd_add_local`.
+    notify_fd: RawFd,
+}
+
+impl<U> Drop for SubscriberSlot<U> {
+    fn drop(&mut self) {
+        unsafe { libc::close(self.notify_fd) };
+    }
+}
+
+/// Returned by [`Broadcaster::subscribe`].  Holds the mpsc receiver and the
+/// read-end of the notification pipe.
+pub(crate) struct Subscription<U> {
+    pub(crate) receiver: std::sync::mpsc::Receiver<U>,
+    pub(crate) notify_fd: RawFd,
+}
+
+impl<U> Drop for Subscription<U> {
+    fn drop(&mut self) {
+        unsafe { libc::close(self.notify_fd) };
+    }
 }
 
 impl<U: Clone + Send> Broadcaster<U> {
@@ -20,17 +52,20 @@ impl<U: Clone + Send> Broadcaster<U> {
         }
     }
 
-    /// Creates a new subscriber channel. If a latest value exists, it is
-    /// immediately sent to the new subscriber (replay).
+    /// Creates a new subscriber.  Returns a [`Subscription`] containing the
+    /// mpsc receiver and a notification pipe fd.
     ///
-    /// Registration and replay are atomic: the subscriber is added to the list
-    /// while still holding the `latest` lock, so no concurrent `broadcast()`
-    /// can slip in between replay and registration.
-    pub(crate) fn subscribe(&self) -> std::sync::mpsc::Receiver<U> {
+    /// If a latest value exists it is immediately queued (replay).
+    /// Registration and replay are atomic.
+    pub(crate) fn subscribe(&self) -> Subscription<U> {
         let (sender, receiver) = std::sync::mpsc::channel();
 
-        // Hold `latest` lock across replay + registration so a concurrent
-        // broadcast() cannot interleave between the two steps.
+        let mut fds = [0i32; 2];
+        let rc = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) };
+        assert_eq!(rc, 0, "failed to create notification pipe");
+        let read_fd = fds[0];
+        let write_fd = fds[1];
+
         let latest = self
             .latest
             .lock()
@@ -38,14 +73,22 @@ impl<U: Clone + Send> Broadcaster<U> {
 
         if let Some(value) = latest.clone() {
             let _ = sender.send(value);
+            // Notify that data is available
+            let _ = nix_write_byte(write_fd);
         }
 
         self.subscribers
             .lock()
             .expect("broadcaster subscribers mutex poisoned")
-            .push(sender);
+            .push(SubscriberSlot {
+                sender,
+                notify_fd: write_fd,
+            });
 
-        receiver
+        Subscription {
+            receiver,
+            notify_fd: read_fd,
+        }
     }
 
     /// Sends an update to all live subscribers, prunes dead ones, and caches
@@ -60,7 +103,14 @@ impl<U: Clone + Send> Broadcaster<U> {
         self.subscribers
             .lock()
             .expect("broadcaster subscribers mutex poisoned")
-            .retain(|sender| sender.send(update.clone()).is_ok());
+            .retain(|slot| {
+                if slot.sender.send(update.clone()).is_ok() {
+                    let _ = nix_write_byte(slot.notify_fd);
+                    true
+                } else {
+                    false
+                }
+            });
     }
 
     /// Returns the number of currently live subscribers.
@@ -72,10 +122,63 @@ impl<U: Clone + Send> Broadcaster<U> {
     }
 }
 
+fn nix_write_byte(fd: RawFd) -> std::io::Result<()> {
+    let buf = [1u8];
+    // SAFETY: fd is a valid pipe write-end, buf is a stack buffer.
+    let rc = unsafe { libc::write(fd, buf.as_ptr() as *const libc::c_void, 1) };
+    if rc < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn drain_pipe(fd: RawFd) {
+    let mut buf = [0u8; 64];
+    loop {
+        let rc = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        if rc <= 0 {
+            break;
+        }
+    }
+}
+
+/// Wires a [`Subscription`] to the GTK main loop via `unix_fd_add_local`.
+///
+/// `apply_fn` is called for each update.  When the widget is destroyed the
+/// source is automatically removed and the subscription dropped, which
+/// closes the pipe and lets the broadcaster prune the dead sender.
+pub(crate) fn attach_subscription<W, U>(
+    widget: &W,
+    subscription: Subscription<U>,
+    mut apply_fn: impl FnMut(&W, U) + 'static,
+) where
+    W: gtk::prelude::IsA<gtk::Widget> + Clone + 'static,
+    U: 'static,
+{
+    let widget_weak = widget.downgrade();
+    let fd = subscription.notify_fd;
+    // We move the whole Subscription into the closure so its Drop fires
+    // when the source is removed (closing the read fd).
+    glib::unix_fd_add_local(fd, IOCondition::IN, move |_, _| {
+        drain_pipe(fd);
+        let Some(widget) = widget_weak.upgrade() else {
+            // Widget gone — drop subscription, closing the pipe and
+            // letting the broadcaster prune on next broadcast.
+            let _ = &subscription;
+            return glib::ControlFlow::Break;
+        };
+        while let Ok(update) = subscription.receiver.try_recv() {
+            apply_fn(&widget, update);
+        }
+        glib::ControlFlow::Continue
+    });
+}
+
 /// Static deduplication registry that maps keys to shared backends.
 ///
 /// `get_or_create` returns an existing backend for the given key, or creates
-/// a new one via the provided closure. The returned `bool` indicates whether
+/// a new one via the provided closure.  The returned `bool` indicates whether
 /// the backend was newly created (caller should start the worker thread only
 /// if `true`).
 pub(crate) struct BackendRegistry<K: Eq + Hash, B> {
@@ -123,7 +226,6 @@ impl<K: Eq + Hash + Clone, B> BackendRegistry<K, B> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
     use std::time::Duration;
 
     use super::*;
@@ -131,17 +233,23 @@ mod tests {
     #[test]
     fn broadcaster_sends_to_all_subscribers() {
         let bc = Broadcaster::new();
-        let rx_a = bc.subscribe();
-        let rx_b = bc.subscribe();
+        let sub_a = bc.subscribe();
+        let sub_b = bc.subscribe();
 
         bc.broadcast("hello".to_string());
 
         assert_eq!(
-            rx_a.recv_timeout(Duration::from_millis(100)).unwrap(),
+            sub_a
+                .receiver
+                .recv_timeout(Duration::from_millis(100))
+                .unwrap(),
             "hello"
         );
         assert_eq!(
-            rx_b.recv_timeout(Duration::from_millis(100)).unwrap(),
+            sub_b
+                .receiver
+                .recv_timeout(Duration::from_millis(100))
+                .unwrap(),
             "hello"
         );
     }
@@ -151,9 +259,11 @@ mod tests {
         let bc = Broadcaster::new();
         bc.broadcast("cached".to_string());
 
-        let rx = bc.subscribe();
+        let sub = bc.subscribe();
         assert_eq!(
-            rx.recv_timeout(Duration::from_millis(100)).unwrap(),
+            sub.receiver
+                .recv_timeout(Duration::from_millis(100))
+                .unwrap(),
             "cached"
         );
     }
@@ -161,11 +271,14 @@ mod tests {
     #[test]
     fn broadcaster_prunes_dead_subscribers() {
         let bc = Broadcaster::new();
-        let (dead_tx, _dead_rx) = mpsc::channel::<String>();
-        drop(_dead_rx);
-        bc.subscribers.lock().unwrap().push(dead_tx);
 
-        let _alive_rx = bc.subscribe();
+        // Create a subscriber then drop it to simulate a dead one
+        let sub = bc.subscribe();
+        assert_eq!(bc.subscriber_count(), 1);
+        drop(sub);
+
+        // Create a live one
+        let _alive_sub = bc.subscribe();
         assert_eq!(bc.subscriber_count(), 2);
 
         bc.broadcast("test".to_string());
@@ -177,18 +290,18 @@ mod tests {
         let bc = Broadcaster::<String>::new();
         assert_eq!(bc.subscriber_count(), 0);
 
-        let _rx1 = bc.subscribe();
+        let _sub1 = bc.subscribe();
         assert_eq!(bc.subscriber_count(), 1);
 
-        let _rx2 = bc.subscribe();
+        let _sub2 = bc.subscribe();
         assert_eq!(bc.subscriber_count(), 2);
     }
 
     #[test]
     fn broadcaster_no_replay_when_no_value_yet() {
         let bc = Broadcaster::<String>::new();
-        let rx = bc.subscribe();
-        assert!(rx.try_recv().is_err());
+        let sub = bc.subscribe();
+        assert!(sub.receiver.try_recv().is_err());
     }
 
     #[test]

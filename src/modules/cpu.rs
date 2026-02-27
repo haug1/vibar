@@ -7,10 +7,11 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
-    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
-    ModuleLabel,
+    escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -105,10 +106,7 @@ fn cpu_registry() -> &'static BackendRegistry<CpuSharedKey, Broadcaster<CpuUpdat
     REGISTRY.get_or_init(BackendRegistry::new)
 }
 
-fn subscribe_shared_cpu(
-    format: String,
-    interval_secs: u32,
-) -> std::sync::mpsc::Receiver<CpuUpdate> {
+fn subscribe_shared_cpu(format: String, interval_secs: u32) -> Subscription<CpuUpdate> {
     let key = CpuSharedKey {
         format: format.clone(),
         interval_secs,
@@ -180,9 +178,9 @@ pub(crate) fn build_cpu_module(
         );
     }
 
-    let receiver = subscribe_shared_cpu(format, effective_interval_secs);
+    let subscription = subscribe_shared_cpu(format, effective_interval_secs);
 
-    poll_receiver(&label, receiver, |label, update| {
+    attach_subscription(&label, subscription, |label, update| {
         let visible = !update.text.trim().is_empty();
         label.set_visible(visible);
         if visible {

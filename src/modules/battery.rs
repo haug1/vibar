@@ -9,10 +9,11 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
-    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
-    ModuleLabel,
+    escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -157,7 +158,7 @@ fn subscribe_shared_battery(
     preferred_device: Option<String>,
     format_icons: Vec<String>,
     interval_secs: u32,
-) -> std::sync::mpsc::Receiver<BatteryUiUpdate> {
+) -> Subscription<BatteryUiUpdate> {
     let key = BatterySharedKey {
         device: preferred_device.clone(),
         format: format.clone(),
@@ -216,14 +217,14 @@ pub(crate) fn build_battery_module(
         );
     }
 
-    let receiver = subscribe_shared_battery(
+    let subscription = subscribe_shared_battery(
         format,
         preferred_device,
         format_icons,
         effective_interval_secs,
     );
 
-    poll_receiver(&label, receiver, |label, update| {
+    attach_subscription(&label, subscription, |label, update| {
         apply_battery_ui_update(label, &update);
     });
 
