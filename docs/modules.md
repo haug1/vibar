@@ -452,7 +452,7 @@ Format placeholders:
 
 Behavior:
 
-- Polls disk stats with `df -B1 -P <path>`.
+- Polls disk stats via `statvfs` syscall (no external process spawn).
 - Values are rendered in binary units (`B`, `K`, `M`, `G`, `T`, `P`).
 
 Styling:

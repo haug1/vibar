@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::ffi::CString;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -183,55 +183,22 @@ pub(crate) fn build_disk_module(
 }
 
 fn read_disk_status(path: &str) -> Result<DiskStatus, String> {
-    let output = Command::new("df")
-        .arg("-B1")
-        .arg("-P")
-        .arg(path)
-        .output()
-        .map_err(|err| format!("failed to run df: {err}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("df exited with status {}", output.status)
-        } else {
-            format!("df failed: {stderr}")
-        });
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_df_output(path, &stdout)
-}
-
-fn parse_df_output(requested_path: &str, stdout: &str) -> Result<DiskStatus, String> {
-    let line = stdout
-        .lines()
-        .nth(1)
-        .ok_or_else(|| "missing df output row".to_string())?;
-    let columns: Vec<&str> = line.split_whitespace().collect();
-    if columns.len() < 6 {
+    let c_path =
+        CString::new(path).map_err(|_| format!("invalid path (contains null byte): {path}"))?;
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    let ret = unsafe { libc::statvfs(c_path.as_ptr(), &mut stat) };
+    if ret != 0 {
         return Err(format!(
-            "unexpected df output row (expected >=6 columns): '{line}'"
+            "statvfs failed for '{path}': {}",
+            std::io::Error::last_os_error()
         ));
     }
-
-    let total_bytes = columns[1]
-        .parse::<u64>()
-        .map_err(|err| format!("failed to parse total bytes '{}': {err}", columns[1]))?;
-    let used_bytes = columns[2]
-        .parse::<u64>()
-        .map_err(|err| format!("failed to parse used bytes '{}': {err}", columns[2]))?;
-    let free_bytes = columns[3]
-        .parse::<u64>()
-        .map_err(|err| format!("failed to parse free bytes '{}': {err}", columns[3]))?;
-    let path = columns[5].to_string();
-
+    let block = stat.f_frsize;
+    let total_bytes = stat.f_blocks * block;
+    let free_bytes = stat.f_bavail * block;
+    let used_bytes = total_bytes.saturating_sub(stat.f_bfree * block);
     Ok(DiskStatus {
-        path: if path.is_empty() {
-            requested_path.to_string()
-        } else {
-            path
-        },
+        path: path.to_string(),
         free_bytes,
         used_bytes,
         total_bytes,
@@ -303,15 +270,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_df_output_parses_bytes() {
-        let output =
-            "Filesystem 1B-blocks Used Available Use% Mounted on\n/dev/sda1 1000 400 600 40% /\n";
-        let status = parse_df_output("/", output).expect("df output should parse");
-
-        assert_eq!(status.total_bytes, 1000);
-        assert_eq!(status.used_bytes, 400);
-        assert_eq!(status.free_bytes, 600);
+    fn read_disk_status_returns_nonzero_for_root() {
+        let status = read_disk_status("/").expect("statvfs on / should succeed");
+        assert!(status.total_bytes > 0);
+        assert!(status.free_bytes > 0);
         assert_eq!(status.path, "/");
+    }
+
+    #[test]
+    fn read_disk_status_rejects_nonexistent_path() {
+        let result = read_disk_status("/nonexistent/path/that/does/not/exist");
+        assert!(result.is_err());
     }
 
     #[test]
