@@ -4,46 +4,21 @@ This document contains implementation-facing details that are intentionally kept
 
 ## Architecture
 
-- Runtime module dispatch is string-keyed by `type` (for example `exec`, `clock`, `cpu`, `memory`, `temperature`, `backlight`, `battery`, `playerctl`, `sway/workspaces`, `sway/mode`, `sway/window`, `pulseaudio`).
-- `src/modules/mod.rs` stores raw module config entries:
-  - `type: String`
-  - module-specific fields as a dynamic map (`serde_json::Map<String, Value>`)
-- Each module file (or module directory) owns:
-  - its `MODULE_TYPE` constant
-  - typed config struct
-  - config parsing from raw map
-  - widget initialization
-- `modules::build_module(...)` finds the registered factory by module type and initializes it.
-- `group` is a composite module that recursively calls `build_module(...)` for child entries.
-- `exec` supports Waybar-compatible output parsing (`i3blocks` line mode and JSON `text`/`class`) and applies dynamic output classes each update.
-- `exec` also supports format templating with safe markup rendering (`{}` / `{text}` for parsed text plus top-level JSON key placeholders).
-- `exec` visibility is derived from parsed output text and auto-hides when that text is empty.
-- `exec` supports `signal` refresh triggers (`SIGRTMIN + N`) and routes them into the shared backend so modules refresh immediately without waiting for interval polling.
-- `playerctl` reads media metadata/status from MPRIS over DBus (`zbus`), updates from DBus signals plus a lightweight periodic position refresh, and supports optional controls popover + `SetPosition` seeking.
-  - Width mode: `max-width` caps viewport while allowing short text to shrink naturally.
-  - Overflow cue: when clipped, playerctl renders a visible `…` indicator.
-  - Tooltip behavior: hover tooltip appears only while the visible playerctl text is truncated.
-  - Implementation layout: `src/modules/playerctl/mod.rs` orchestration + `src/modules/playerctl/config.rs` (schema/defaults), `src/modules/playerctl/backend.rs` (MPRIS DBus backend), `src/modules/playerctl/model.rs` (pure metadata/format helpers), `src/modules/playerctl/ui.rs` (GTK tooltip/carousel/controls UI wiring).
-- PulseAudio module uses native `libpulse` subscriptions/introspection (`src/modules/pulseaudio.rs`) rather than shelling out to `pactl`, and supports an optional popover controls UI (default sink mute/volume, active sink-input stream mute/volume, output-device switching via `set_default_sink`, and per-device port switching) plus optional dedicated right-click command wiring (`right-click` / `on-right-click`).
-- Tray module accepts both canonical watcher item addresses (`service/path`) and service-only entries (defaults to `/StatusNotifierItem`) when building SNI proxies.
-- Tray module includes an in-process `StatusNotifierWatcher` fallback when no external watcher is present; fallback reports host-registered state as `true` and logs registration calls when `VIBAR_DEBUG_TRAY=1`.
-- Fallback watcher tracks DBus `NameOwnerChanged` to prune registered item IDs whose owner disappears, preventing stale tray entries after app exit.
-- Tray refresh cadence is event-driven via StatusNotifier watcher signals (`StatusNotifierItemRegistered`/`StatusNotifierItemUnregistered`), tray item `PropertiesChanged`, and tray-relevant owner changes (`StatusNotifier`/`ayatana`); interval polling is retained as coarse fallback/resync.
-- Tray backend now keeps a persistent session connection and one-time host registration state (per connection), rather than reconnecting/re-registering each refresh.
-- Tray refresh requests are debounced before snapshot fetches to collapse bursty DBus signal storms.
-- Tray GTK rendering reuses unchanged item widgets keyed by tray item id and recreates only changed entries.
-- Tray snapshot building skips items that report SNI `Status=Passive` to avoid stale/missing-icon entries after app exit.
-- Backlight module runs an event-driven backend for `/sys/class/backlight` with cached device/snapshot state, dispatches UI updates immediately on GTK main context, uses `udev` callbacks as primary trigger, and keeps interval-based resync as fallback/safety; supports explicit `device` selection or largest-`max_brightness` fallback.
-- Backlight default scroll behavior uses logind DBus `SetBrightness`; optional `on-scroll-up`/`on-scroll-down` commands can override that behavior.
-- Battery module runs an event-driven backend for `/sys/class/power_supply` with `udev` callbacks as primary trigger and interval-based resync fallback; auto-discovers battery devices (or uses explicit `device`) and maps capacity/status to dynamic CSS classes for styling.
-- Temperature module polls Linux sensor files (`path`/`hwmon-path` or `/sys/class/thermal/thermal_zoneX/temp`) and maps threshold states to dynamic CSS classes.
-- `sway/workspaces` supports module-level `class` and per-button `button-class`/`button_class` style hooks.
-- `sway/mode` tracks active sway binding mode (`get_binding_state`) and hides itself when mode is `default`.
-- `sway/window` supports markup-aware `format` with `{}`/`{title}` placeholders for focused title rendering.
-- Markup-capable format modules (`sway/mode`, `clock`, `playerctl`, `cpu`, `memory`, `temperature`, `disk`, `backlight`, `battery`, `pulseaudio`) render via Pango markup and escape replacement values before insertion.
-- Config loading prefers `~/.config/vibar/config.jsonc`, then embedded `config.jsonc` bundled in binary.
-- Top-level style config supports layered CSS (`style.load-default` + `style.path`).
-- Embedded default stylesheet includes small utility classes (`v-pill`, `v-square`) for quick module appearance tuning from config.
+Module behavior, config fields, and styling selectors are documented in `docs/modules.md` (the canonical reference). This section covers code structure and implementation decisions only.
+
+### Module System
+
+- Runtime module dispatch is string-keyed by `type`.
+- `src/modules/mod.rs` stores raw module config entries (`type: String` + dynamic `serde_json::Map`) and the `FACTORIES` registry.
+- Each module file (or module directory) owns its `MODULE_TYPE` constant, typed config struct, config parsing, and widget initialization.
+- `modules::build_module(...)` finds the registered factory by type and initializes it.
+- `group` (`src/modules/group.rs`) is a composite module that recursively calls `build_module(...)` for child entries.
+
+### Implementation Details
+
+- `playerctl` layout: `src/modules/playerctl/mod.rs` (orchestration), `config.rs` (schema/defaults), `backend.rs` (MPRIS DBus via `zbus`), `model.rs` (pure metadata/format helpers), `ui.rs` (GTK tooltip/carousel/controls UI wiring).
+- `pulseaudio` (`src/modules/pulseaudio.rs`) uses native `libpulse` subscriptions/introspection rather than shelling out to `pactl`.
+- `backlight` and `battery` use `udev` callbacks as primary update trigger with immediate GTK main-thread dispatch.
 
 ## Adding A Module
 
@@ -57,21 +32,14 @@ This document contains implementation-facing details that are intentionally kept
 
 ## Troubleshooting
 
-- To log sway workspace state each refresh, run with `VIBAR_DEBUG_WORKSPACES=1`.
-  - Example: `VIBAR_DEBUG_WORKSPACES=1 cargo run --locked`
-- To log tray DBus click method calls/errors, run with `VIBAR_DEBUG_TRAY=1`.
-  - Also logs tray discovery path (watcher proxy/registration, registered item IDs, address parsing, and resolved snapshot count) for startup diagnostics.
-  - Example: `VIBAR_DEBUG_TRAY=1 cargo run --locked`
-- To print the GTK widget tree with CSS classes for selector discovery, run with `VIBAR_DEBUG_DOM=1`.
-  - Dumps at startup and then periodically (default every 10s).
-  - Optional interval override: `VIBAR_DEBUG_DOM_INTERVAL_SECS=<n>` (minimum `1`).
-  - Example: `VIBAR_DEBUG_DOM=1 VIBAR_DEBUG_DOM_INTERVAL_SECS=5 cargo run --locked`
+Debug environment variables (combine with `cargo run --locked`):
+
+- `VIBAR_DEBUG_WORKSPACES=1` — log sway workspace state each refresh.
+- `VIBAR_DEBUG_TRAY=1` — log tray DBus calls, discovery, and errors.
+- `VIBAR_DEBUG_DOM=1` — dump GTK widget tree + CSS classes at startup and periodically. Override interval with `VIBAR_DEBUG_DOM_INTERVAL_SECS=<n>`.
 
 ## Notes
 
-- Keep lockfile-based builds (`--locked`) for reproducibility.
-- Keep `README.md` concise and point to expanded docs in `docs/`.
 - For modules with shell click actions, use `modules::attach_primary_click_command(...)` for left click (`.clickable` class + gesture wiring), and `modules::attach_secondary_click_command(...)` for optional right-click command wiring.
-- Keep OS package requirements centralized in `scripts/install-deps.sh`; CI installs system dependencies via that script to avoid drift.
-- Dependency bootstrap script currently targets Arch-based and Fedora/RHEL-based distros only.
-- Dependabot automation is configured in `.github/dependabot.yml`; cargo updates include direct dependency checks plus lockfile-only indirect updates, and GTK stack dependencies (`gtk4`, `gtk4-layer-shell`, `glib`, `gio`) are grouped in one PR. Dependabot PRs enable GitHub auto-merge via `.github/workflows/dependabot-automerge.yml` and still require CI to pass before merge.
+- OS package requirements are centralized in `scripts/install-deps.sh`; CI installs system dependencies via that script to avoid drift.
+- Dependabot config lives in `.github/dependabot.yml`; auto-merge workflow in `.github/workflows/dependabot-automerge.yml`. See `README.md` for the full dependency automation policy.

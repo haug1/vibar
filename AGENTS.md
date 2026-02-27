@@ -22,15 +22,14 @@ If dependencies change in `Cargo.toml`, update and commit `Cargo.lock`.
 - Prefer lockfile-based commands (`--locked`) where defined.
 - Avoid large refactors unless explicitly requested.
 
-## Files That Must Stay In Sync
+## Documentation Ownership
 
-When behavior, commands, architecture, or docs structure change, update:
+Each doc file has a clear scope — avoid duplicating information across files:
 
-- `README.md` for user-facing usage/docs
-- `SESSION_NOTES.md` for concise future-session orientation
-- `docs/modules.md` for module config/styling behavior
-- `docs/developer.md` for architecture/extension workflow
-- `config.jsonc` example if config schema/defaults changed
+- `docs/modules.md` — canonical reference for module config, behavior, and styling (update here when module behavior changes)
+- `docs/developer.md` — code structure, file locations, implementation decisions (update here when architecture changes)
+- `README.md` — user-facing overview, build/run commands, feature highlights (update here when user-facing workflow changes)
+- `config.jsonc` — example config (update here when config schema/defaults change)
 
 ## Safety
 
