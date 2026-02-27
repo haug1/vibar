@@ -2,9 +2,8 @@ use std::fs;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
@@ -13,9 +12,10 @@ use serde::Deserialize;
 use serde_json::Value;
 use zbus::blocking::{Connection, Proxy};
 
+use crate::modules::broadcaster::BackendRegistry;
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
-    ModuleBuildContext, ModuleConfig,
+    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
+    ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -101,6 +101,22 @@ struct UdevMonitor {
     monitor: udev::MonitorSocket,
 }
 
+/// Shared state for backlight: broadcast for UI updates + control channel for
+/// brightness adjustments (scroll events).
+struct SharedBacklightState {
+    broadcaster: crate::modules::broadcaster::Broadcaster<BacklightUiUpdate>,
+    control_tx: std::sync::Mutex<Sender<BacklightControlMessage>>,
+    control_rx: std::sync::Mutex<Option<Receiver<BacklightControlMessage>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BacklightSharedKey {
+    device: Option<String>,
+    format: String,
+    format_icons: Vec<String>,
+    interval_secs: u32,
+}
+
 pub(crate) struct BacklightFactory;
 
 pub(crate) const FACTORY: BacklightFactory = BacklightFactory;
@@ -130,15 +146,15 @@ fn default_min_brightness() -> f64 {
 
 fn default_backlight_icons() -> Vec<String> {
     vec![
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
     ]
 }
 
@@ -158,12 +174,81 @@ pub(crate) fn normalized_backlight_interval(interval_secs: u32) -> u32 {
     interval_secs.max(MIN_BACKLIGHT_INTERVAL_SECS)
 }
 
+fn backlight_registry() -> &'static BackendRegistry<BacklightSharedKey, SharedBacklightState> {
+    static REGISTRY: OnceLock<BackendRegistry<BacklightSharedKey, SharedBacklightState>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
+
+fn subscribe_shared_backlight(
+    config: &BacklightConfig,
+    effective_interval_secs: u32,
+) -> (
+    std::sync::mpsc::Receiver<BacklightUiUpdate>,
+    Sender<BacklightControlMessage>,
+) {
+    let format = config
+        .format
+        .clone()
+        .unwrap_or_else(|| DEFAULT_BACKLIGHT_FORMAT.to_string());
+    let key = BacklightSharedKey {
+        device: config.device.clone(),
+        format: format.clone(),
+        format_icons: config.format_icons.clone(),
+        interval_secs: effective_interval_secs,
+    };
+
+    let (shared, start_worker) = backlight_registry().get_or_create(key.clone(), || {
+        let (control_tx, control_rx) = mpsc::channel();
+        SharedBacklightState {
+            broadcaster: crate::modules::broadcaster::Broadcaster::new(),
+            control_tx: std::sync::Mutex::new(control_tx),
+            control_rx: std::sync::Mutex::new(Some(control_rx)),
+        }
+    });
+
+    let ui_rx = shared.broadcaster.subscribe();
+    let control_tx = shared
+        .control_tx
+        .lock()
+        .expect("backlight control_tx mutex poisoned")
+        .clone();
+
+    if start_worker {
+        let control_rx = shared
+            .control_rx
+            .lock()
+            .expect("backlight control_rx mutex poisoned")
+            .take()
+            .expect("control_rx should be present on first create");
+        start_backlight_worker(key, shared, control_rx, format, config.clone());
+    }
+
+    (ui_rx, control_tx)
+}
+
+fn start_backlight_worker(
+    key: BacklightSharedKey,
+    shared: Arc<SharedBacklightState>,
+    control_rx: Receiver<BacklightControlMessage>,
+    format: String,
+    config: BacklightConfig,
+) {
+    std::thread::spawn(move || {
+        run_backlight_backend_loop(
+            &key,
+            &shared,
+            control_rx,
+            format,
+            config.device,
+            config.format_icons,
+            key.interval_secs,
+        );
+    });
+}
+
 fn build_backlight_module(config: BacklightConfig) -> Label {
     let BacklightConfig {
-        format,
-        interval_secs,
-        device: preferred_device,
-        format_icons,
         click,
         on_click,
         on_scroll_up,
@@ -171,16 +256,15 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
         scroll_step,
         min_brightness,
         class,
-    } = config;
-    let format = format.unwrap_or_else(|| DEFAULT_BACKLIGHT_FORMAT.to_string());
+        interval_secs,
+        ..
+    } = config.clone();
     let click_command = click.or(on_click);
 
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("backlight");
-
-    apply_css_classes(&label, class.as_deref());
-    attach_primary_click_command(&label, click_command);
+    let label = ModuleLabel::new("backlight")
+        .with_css_classes(class.as_deref())
+        .with_click_command(click_command)
+        .into_label();
 
     let effective_interval_secs = normalized_backlight_interval(interval_secs);
     if effective_interval_secs != interval_secs {
@@ -190,32 +274,10 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
         );
     }
 
-    let main_context = gtk::glib::MainContext::default();
-    let label_weak = gtk::glib::SendWeakRef::from(label.downgrade());
-    let alive = Arc::new(AtomicBool::new(true));
+    let (ui_rx, control_tx) = subscribe_shared_backlight(&config, effective_interval_secs);
 
-    let (control_tx, control_rx) = mpsc::channel::<BacklightControlMessage>();
-
-    std::thread::spawn({
-        let format = format.clone();
-        let preferred_device = preferred_device.clone();
-        let format_icons = format_icons.clone();
-        let alive = alive.clone();
-        move || {
-            let ui = UiHandle {
-                main_context,
-                label_weak,
-                alive,
-            };
-            run_backlight_backend_loop(
-                ui,
-                control_rx,
-                format,
-                preferred_device,
-                format_icons,
-                effective_interval_secs,
-            );
-        }
+    poll_receiver(&label, ui_rx, |label, update| {
+        apply_backlight_ui_update(label, &update);
     });
 
     let scroll_step = normalized_scroll_step(scroll_step);
@@ -283,32 +345,9 @@ fn apply_backlight_ui_update(label: &Label, update: &BacklightUiUpdate) {
     label.add_css_class(update.level_class);
 }
 
-struct UiHandle {
-    main_context: gtk::glib::MainContext,
-    label_weak: gtk::glib::SendWeakRef<Label>,
-    alive: Arc<AtomicBool>,
-}
-
-impl UiHandle {
-    fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::Relaxed)
-    }
-
-    fn dispatch(&self, update: BacklightUiUpdate) {
-        let label_weak = self.label_weak.clone();
-        let alive = self.alive.clone();
-        std::mem::drop(self.main_context.spawn(async move {
-            if let Some(label) = label_weak.upgrade() {
-                apply_backlight_ui_update(&label, &update);
-            } else {
-                alive.store(false, Ordering::Relaxed);
-            }
-        }));
-    }
-}
-
 fn run_backlight_backend_loop(
-    ui: UiHandle,
+    key: &BacklightSharedKey,
+    shared: &Arc<SharedBacklightState>,
     control_rx: Receiver<BacklightControlMessage>,
     format: String,
     preferred_device: Option<String>,
@@ -327,10 +366,13 @@ fn run_backlight_backend_loop(
     };
 
     backend.refresh_from_sysfs();
-    ui.dispatch(backend.build_ui_update(&format, &format_icons));
+    shared
+        .broadcaster
+        .broadcast(backend.build_ui_update(&format, &format_icons));
 
     loop {
-        if !ui.is_alive() {
+        if shared.broadcaster.subscriber_count() == 0 {
+            backlight_registry().remove(key, shared);
             return;
         }
 
@@ -339,7 +381,9 @@ fn run_backlight_backend_loop(
                 backend.last_error = Some(err);
             }
             backend.refresh_from_sysfs();
-            ui.dispatch(backend.build_ui_update(&format, &format_icons));
+            shared
+                .broadcaster
+                .broadcast(backend.build_ui_update(&format, &format_icons));
         }
 
         let wake_timeout =
@@ -350,7 +394,9 @@ fn run_backlight_backend_loop(
                 Ok(true) => {
                     if monitor.drain_events() {
                         backend.refresh_from_sysfs();
-                        ui.dispatch(backend.build_ui_update(&format, &format_icons));
+                        shared
+                            .broadcaster
+                            .broadcast(backend.build_ui_update(&format, &format_icons));
                     }
                 }
                 Ok(false) => {}
@@ -365,7 +411,9 @@ fn run_backlight_backend_loop(
 
         if last_resync.elapsed() >= resync_interval {
             backend.refresh_from_sysfs();
-            ui.dispatch(backend.build_ui_update(&format, &format_icons));
+            shared
+                .broadcaster
+                .broadcast(backend.build_ui_update(&format, &format_icons));
             last_resync = Instant::now();
         }
     }
