@@ -193,10 +193,18 @@ fn read_disk_status(path: &str) -> Result<DiskStatus, String> {
             std::io::Error::last_os_error()
         ));
     }
-    let block = stat.f_frsize;
-    let total_bytes = stat.f_blocks * block;
-    let free_bytes = stat.f_bavail * block;
-    let used_bytes = total_bytes.saturating_sub(stat.f_bfree * block);
+    let block = if stat.f_frsize == 0 {
+        stat.f_bsize
+    } else {
+        stat.f_frsize
+    };
+    if block == 0 {
+        return Err(format!("statvfs returned zero block size for '{path}'"));
+    }
+
+    let total_bytes = stat.f_blocks.saturating_mul(block);
+    let free_bytes = stat.f_bavail.saturating_mul(block);
+    let used_bytes = total_bytes.saturating_sub(stat.f_bfree.saturating_mul(block));
     Ok(DiskStatus {
         path: path.to_string(),
         free_bytes,
