@@ -101,7 +101,7 @@ pub(crate) enum PulseAudioControlsOpenMode {
     RightClick,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PulseAudioFormatIcons {
     #[serde(default)]
     pub(crate) headphone: Option<String>,
@@ -225,7 +225,15 @@ struct UiUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct PulseSharedKey {}
+struct PulseSharedKey {
+    format: Option<String>,
+    format_bluetooth: Option<String>,
+    format_bluetooth_muted: Option<String>,
+    format_muted: Option<String>,
+    format_source: Option<String>,
+    format_source_muted: Option<String>,
+    format_icons: PulseAudioFormatIcons,
+}
 
 struct SharedPulseState {
     broadcaster: Broadcaster<UiUpdate>,
@@ -241,7 +249,15 @@ fn pulse_registry() -> &'static BackendRegistry<PulseSharedKey, SharedPulseState
 fn subscribe_shared_pulse(
     config: &PulseAudioConfig,
 ) -> (Subscription<UiUpdate>, Sender<WorkerCommand>) {
-    let key = PulseSharedKey {};
+    let key = PulseSharedKey {
+        format: config.format.clone(),
+        format_bluetooth: config.format_bluetooth.clone(),
+        format_bluetooth_muted: config.format_bluetooth_muted.clone(),
+        format_muted: config.format_muted.clone(),
+        format_source: config.format_source.clone(),
+        format_source_muted: config.format_source_muted.clone(),
+        format_icons: config.format_icons.clone(),
+    };
 
     let render_config = config.clone();
     let (shared, start_worker) = pulse_registry().get_or_create(key.clone(), || {
