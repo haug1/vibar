@@ -7,13 +7,11 @@ use std::sync::{Arc, Mutex};
 /// Each subscriber receives updates via a standard mpsc channel.
 /// New subscribers immediately receive the latest cached value (if any).
 /// Dead subscribers are pruned on each broadcast.
-#[allow(dead_code)]
 pub(crate) struct Broadcaster<U: Clone + Send> {
     latest: Mutex<Option<U>>,
-    subscribers: Mutex<Vec<std::sync::mpsc::Sender<U>>>,
+    pub(crate) subscribers: Mutex<Vec<std::sync::mpsc::Sender<U>>>,
 }
 
-#[allow(dead_code)]
 impl<U: Clone + Send> Broadcaster<U> {
     pub(crate) fn new() -> Self {
         Self {
@@ -73,12 +71,10 @@ impl<U: Clone + Send> Broadcaster<U> {
 /// a new one via the provided closure. The returned `bool` indicates whether
 /// the backend was newly created (caller should start the worker thread only
 /// if `true`).
-#[allow(dead_code)]
 pub(crate) struct BackendRegistry<K: Eq + Hash, B> {
     backends: Mutex<HashMap<K, Arc<B>>>,
 }
 
-#[allow(dead_code)]
 impl<K: Eq + Hash + Clone, B> BackendRegistry<K, B> {
     pub(crate) fn new() -> Self {
         Self {
