@@ -72,8 +72,7 @@ make ci
 ## Dependency Automation
 
 - Dependabot checks Rust (`cargo`) and GitHub Actions dependencies weekly.
-- Cargo updates include direct dependency checks plus a lockfile-only indirect dependency job.
-- GTK stack updates (`gtk4`, `gtk4-layer-shell`, `glib`, `gio`) are grouped into a single Dependabot PR.
+- GTK stack updates (`gtk4`, `gtk4-layer-shell`) are grouped into a single Dependabot PR.
 - Dependabot PRs are configured to auto-merge when repository checks pass.
 
 ## Documentation
