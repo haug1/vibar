@@ -22,16 +22,22 @@ impl<U: Clone + Send> Broadcaster<U> {
 
     /// Creates a new subscriber channel. If a latest value exists, it is
     /// immediately sent to the new subscriber (replay).
+    ///
+    /// Registration and replay are atomic: the subscriber is added to the list
+    /// while still holding the `latest` lock, so no concurrent `broadcast()`
+    /// can slip in between replay and registration.
     pub(crate) fn subscribe(&self) -> std::sync::mpsc::Receiver<U> {
         let (sender, receiver) = std::sync::mpsc::channel();
 
-        if let Some(latest) = self
+        // Hold `latest` lock across replay + registration so a concurrent
+        // broadcast() cannot interleave between the two steps.
+        let latest = self
             .latest
             .lock()
-            .expect("broadcaster latest mutex poisoned")
-            .clone()
-        {
-            let _ = sender.send(latest);
+            .expect("broadcaster latest mutex poisoned");
+
+        if let Some(value) = latest.clone() {
+            let _ = sender.send(value);
         }
 
         self.subscribers
@@ -45,10 +51,11 @@ impl<U: Clone + Send> Broadcaster<U> {
     /// Sends an update to all live subscribers, prunes dead ones, and caches
     /// the value for future subscribers.
     pub(crate) fn broadcast(&self, update: U) {
-        *self
+        let mut latest = self
             .latest
             .lock()
-            .expect("broadcaster latest mutex poisoned") = Some(update.clone());
+            .expect("broadcaster latest mutex poisoned");
+        *latest = Some(update.clone());
 
         self.subscribers
             .lock()
