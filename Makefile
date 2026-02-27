@@ -28,14 +28,14 @@ fmt:
 	cargo fmt --all
 
 lint:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets --locked -- -D warnings
 
 test:
 	cargo test --locked
 
 ci:
 	cargo fmt --all -- --check
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy --all-targets --locked -- -D warnings
 	cargo test --locked
 
 install:

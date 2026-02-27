@@ -2,7 +2,9 @@ use std::fs;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
@@ -190,6 +192,7 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
 
     let main_context = gtk::glib::MainContext::default();
     let label_weak = gtk::glib::SendWeakRef::from(label.downgrade());
+    let alive = Arc::new(AtomicBool::new(true));
 
     let (control_tx, control_rx) = mpsc::channel::<BacklightControlMessage>();
 
@@ -197,10 +200,15 @@ fn build_backlight_module(config: BacklightConfig) -> Label {
         let format = format.clone();
         let preferred_device = preferred_device.clone();
         let format_icons = format_icons.clone();
+        let alive = alive.clone();
         move || {
-            run_backlight_backend_loop(
+            let ui = UiHandle {
                 main_context,
                 label_weak,
+                alive,
+            };
+            run_backlight_backend_loop(
+                ui,
                 control_rx,
                 format,
                 preferred_device,
@@ -275,19 +283,38 @@ fn apply_backlight_ui_update(label: &Label, update: &BacklightUiUpdate) {
     label.add_css_class(update.level_class);
 }
 
-fn run_backlight_backend_loop(
+struct UiHandle {
     main_context: gtk::glib::MainContext,
     label_weak: gtk::glib::SendWeakRef<Label>,
+    alive: Arc<AtomicBool>,
+}
+
+impl UiHandle {
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Relaxed)
+    }
+
+    fn dispatch(&self, update: BacklightUiUpdate) {
+        let label_weak = self.label_weak.clone();
+        let alive = self.alive.clone();
+        std::mem::drop(self.main_context.spawn(async move {
+            if let Some(label) = label_weak.upgrade() {
+                apply_backlight_ui_update(&label, &update);
+            } else {
+                alive.store(false, Ordering::Relaxed);
+            }
+        }));
+    }
+}
+
+fn run_backlight_backend_loop(
+    ui: UiHandle,
     control_rx: Receiver<BacklightControlMessage>,
     format: String,
     preferred_device: Option<String>,
     format_icons: Vec<String>,
     interval_secs: u32,
 ) {
-    if label_weak.upgrade().is_none() {
-        return;
-    }
-
     let resync_interval = Duration::from_secs(u64::from(interval_secs));
     let mut last_resync = Instant::now();
     let mut backend = BacklightBackend::new(preferred_device);
@@ -300,14 +327,10 @@ fn run_backlight_backend_loop(
     };
 
     backend.refresh_from_sysfs();
-    dispatch_backlight_ui_update(
-        &main_context,
-        &label_weak,
-        backend.build_ui_update(&format, &format_icons),
-    );
+    ui.dispatch(backend.build_ui_update(&format, &format_icons));
 
     loop {
-        if label_weak.upgrade().is_none() {
+        if !ui.is_alive() {
             return;
         }
 
@@ -316,11 +339,7 @@ fn run_backlight_backend_loop(
                 backend.last_error = Some(err);
             }
             backend.refresh_from_sysfs();
-            dispatch_backlight_ui_update(
-                &main_context,
-                &label_weak,
-                backend.build_ui_update(&format, &format_icons),
-            );
+            ui.dispatch(backend.build_ui_update(&format, &format_icons));
         }
 
         let wake_timeout =
@@ -331,11 +350,7 @@ fn run_backlight_backend_loop(
                 Ok(true) => {
                     if monitor.drain_events() {
                         backend.refresh_from_sysfs();
-                        dispatch_backlight_ui_update(
-                            &main_context,
-                            &label_weak,
-                            backend.build_ui_update(&format, &format_icons),
-                        );
+                        ui.dispatch(backend.build_ui_update(&format, &format_icons));
                     }
                 }
                 Ok(false) => {}
@@ -350,27 +365,10 @@ fn run_backlight_backend_loop(
 
         if last_resync.elapsed() >= resync_interval {
             backend.refresh_from_sysfs();
-            dispatch_backlight_ui_update(
-                &main_context,
-                &label_weak,
-                backend.build_ui_update(&format, &format_icons),
-            );
+            ui.dispatch(backend.build_ui_update(&format, &format_icons));
             last_resync = Instant::now();
         }
     }
-}
-
-fn dispatch_backlight_ui_update(
-    main_context: &gtk::glib::MainContext,
-    label_weak: &gtk::glib::SendWeakRef<Label>,
-    update: BacklightUiUpdate,
-) {
-    let label_weak = label_weak.clone();
-    std::mem::drop(main_context.spawn(async move {
-        if let Some(label) = label_weak.upgrade() {
-            apply_backlight_ui_update(&label, &update);
-        }
-    }));
 }
 
 fn millis_until_next_resync(last_resync: Instant, interval: Duration) -> u64 {
