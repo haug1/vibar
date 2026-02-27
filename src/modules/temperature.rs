@@ -330,7 +330,7 @@ fn render_temperature_format(
     let celsius = reading.celsius.round() as i32;
     let fahrenheit = (reading.celsius * 1.8 + 32.0).round() as i32;
     let kelvin = (reading.celsius + 273.15).round() as i32;
-    let icon = icon_for_temperature(format_icons, celsius);
+    let icon = super::icon_for_percentage(format_icons, celsius.clamp(0, 100) as u8);
 
     render_markup_template(
         format,
@@ -341,22 +341,9 @@ fn render_temperature_format(
             ("{temperatureC}", &celsius.to_string()),
             ("{temperatureF}", &fahrenheit.to_string()),
             ("{temperatureK}", &kelvin.to_string()),
-            ("{icon}", &icon),
+            ("{icon}", icon),
         ],
     )
-}
-
-fn icon_for_temperature(format_icons: &[String], temperature_c: i32) -> String {
-    if format_icons.is_empty() {
-        return String::new();
-    }
-    if format_icons.len() == 1 {
-        return format_icons[0].clone();
-    }
-
-    let clamped = temperature_c.clamp(0, 100) as usize;
-    let index = (clamped * (format_icons.len() - 1)) / 100;
-    format_icons[index].clone()
 }
 
 #[cfg(test)]

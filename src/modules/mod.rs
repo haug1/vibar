@@ -128,6 +128,18 @@ pub(crate) fn render_markup_template(template: &str, replacements: &[(&str, &str
     rendered
 }
 
+pub(crate) fn icon_for_percentage(format_icons: &[String], percent: u8) -> &str {
+    if format_icons.is_empty() {
+        return "";
+    }
+    if format_icons.len() == 1 {
+        return &format_icons[0];
+    }
+    let clamped = percent.min(100) as usize;
+    let index = (clamped * (format_icons.len() - 1)) / 100;
+    &format_icons[index]
+}
+
 /// Builder that consolidates repeated label setup across modules.
 pub(crate) struct ModuleLabel {
     module_class: &'static str,
@@ -176,5 +188,23 @@ mod tests {
         let err = build_module(&module, &ModuleBuildContext::default())
             .expect_err("unknown module should fail");
         assert!(err.contains("unknown module type 'does-not-exist'"));
+    }
+
+    #[test]
+    fn icon_for_percentage_maps_range() {
+        let icons = vec!["low".to_string(), "mid".to_string(), "high".to_string()];
+        assert_eq!(icon_for_percentage(&icons, 0), "low");
+        assert_eq!(icon_for_percentage(&icons, 50), "mid");
+        assert_eq!(icon_for_percentage(&icons, 100), "high");
+    }
+
+    #[test]
+    fn icon_for_percentage_handles_edge_cases() {
+        let empty: Vec<String> = vec![];
+        assert_eq!(icon_for_percentage(&empty, 50), "");
+
+        let single = vec!["only".to_string()];
+        assert_eq!(icon_for_percentage(&single, 0), "only");
+        assert_eq!(icon_for_percentage(&single, 100), "only");
     }
 }
