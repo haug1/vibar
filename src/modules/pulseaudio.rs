@@ -219,9 +219,9 @@ enum WorkerCommand {
 }
 
 #[derive(Clone)]
-enum UiUpdate {
-    Label(String),
-    Controls(AudioControlsState),
+struct UiUpdate {
+    label_text: String,
+    controls: Option<AudioControlsState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -433,18 +433,14 @@ fn build_pulseaudio_module(
                 return ControlFlow::Break;
             };
             while let Ok(update) = ui_receiver.try_recv() {
-                match update {
-                    UiUpdate::Label(text) => {
-                        let visible = !text.trim().is_empty();
-                        label.set_visible(visible);
-                        if visible {
-                            label.set_markup(&text);
-                        }
-                    }
-                    UiUpdate::Controls(state) => {
-                        if let Some(controls_ui) = controls_ui.as_ref() {
-                            refresh_controls_ui(controls_ui, &state, worker_tx.clone());
-                        }
+                let visible = !update.label_text.trim().is_empty();
+                label.set_visible(visible);
+                if visible {
+                    label.set_markup(&update.label_text);
+                }
+                if let Some(state) = update.controls.as_ref() {
+                    if let Some(controls_ui) = controls_ui.as_ref() {
+                        refresh_controls_ui(controls_ui, state, worker_tx.clone());
                     }
                 }
             }
@@ -757,9 +753,10 @@ fn run_native_loop(
         match run_native_session(broadcaster, &worker_rx, &config) {
             Ok(()) => return,
             Err(err) => {
-                broadcaster.broadcast(UiUpdate::Label(escape_markup_text(&format!(
-                    "audio error: {err}"
-                ))));
+                broadcaster.broadcast(UiUpdate {
+                    label_text: escape_markup_text(&format!("audio error: {err}")),
+                    controls: None,
+                });
                 std::thread::sleep(Duration::from_secs(SESSION_RECONNECT_DELAY_SECS));
             }
         }
@@ -873,13 +870,16 @@ fn run_native_session(
             match query_current_state(&context, &mut mainloop) {
                 Ok((state, defaults, controls_state)) => {
                     last_defaults = Some(defaults);
-                    broadcaster.broadcast(UiUpdate::Label(render_format(config, &state)));
-                    broadcaster.broadcast(UiUpdate::Controls(controls_state));
+                    broadcaster.broadcast(UiUpdate {
+                        label_text: render_format(config, &state),
+                        controls: Some(controls_state),
+                    });
                 }
                 Err(err) => {
-                    broadcaster.broadcast(UiUpdate::Label(escape_markup_text(&format!(
-                        "audio error: {err}"
-                    ))));
+                    broadcaster.broadcast(UiUpdate {
+                        label_text: escape_markup_text(&format!("audio error: {err}")),
+                        controls: None,
+                    });
                 }
             }
         }
