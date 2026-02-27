@@ -1,16 +1,15 @@
-use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
+use std::sync::{Arc, OnceLock};
 
-use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 use swayipc::{Connection, EventType};
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
-    ModuleBuildContext, ModuleConfig, ModuleFactory,
+    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
+    ModuleFactory, ModuleLabel,
 };
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -23,6 +22,17 @@ pub(crate) struct ModeConfig {
     pub(crate) on_click: Option<String>,
     #[serde(default)]
     pub(crate) class: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ModeUpdate {
+    text: String,
+    visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ModeSharedKey {
+    format: String,
 }
 
 pub(crate) struct SwayModeFactory;
@@ -58,131 +68,122 @@ fn parse_config(module: &ModuleConfig) -> Result<ModeConfig, String> {
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
 }
 
-fn build_mode_module(
-    format: String,
-    click_command: Option<String>,
-    class: Option<String>,
-) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("sway-mode");
-    apply_css_classes(&label, class.as_deref());
-    attach_primary_click_command(&label, click_command);
-
-    let (mut signal_rx, signal_tx) = match std::os::unix::net::UnixStream::pair() {
-        Ok(pair) => pair,
-        Err(err) => {
-            eprintln!("vibar/sway-mode: failed to create event signal pipe: {err}");
-            refresh_mode(&label, &format);
-            return label;
-        }
-    };
-    if let Err(err) = signal_rx.set_nonblocking(true) {
-        eprintln!("vibar/sway-mode: failed to set nonblocking event signal pipe: {err}");
-        refresh_mode(&label, &format);
-        return label;
-    }
-
-    start_mode_event_listener(signal_tx);
-    refresh_mode(&label, &format);
-
-    let label_weak = label.downgrade();
-    gtk::glib::source::unix_fd_add_local(
-        signal_rx.as_raw_fd(),
-        gtk::glib::IOCondition::IN | gtk::glib::IOCondition::HUP | gtk::glib::IOCondition::ERR,
-        {
-            let format = format.clone();
-            move |_, condition| {
-                let Some(label) = label_weak.upgrade() else {
-                    return ControlFlow::Break;
-                };
-                if condition.intersects(gtk::glib::IOCondition::HUP | gtk::glib::IOCondition::ERR) {
-                    return ControlFlow::Break;
-                }
-
-                let mut had_event = false;
-                let mut buf = [0_u8; 64];
-                loop {
-                    match signal_rx.read(&mut buf) {
-                        Ok(0) => return ControlFlow::Break,
-                        Ok(_) => had_event = true,
-                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => break,
-                        Err(err) => {
-                            eprintln!("vibar/sway-mode: failed to read event signal pipe: {err}");
-                            return ControlFlow::Break;
-                        }
-                    }
-                }
-
-                if had_event {
-                    refresh_mode(&label, &format);
-                }
-                ControlFlow::Continue
-            }
-        },
-    );
-
-    label
+fn mode_registry() -> &'static BackendRegistry<ModeSharedKey, Broadcaster<ModeUpdate>> {
+    static REGISTRY: OnceLock<BackendRegistry<ModeSharedKey, Broadcaster<ModeUpdate>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
 }
 
-fn start_mode_event_listener(mut signal_tx: std::os::unix::net::UnixStream) {
-    std::thread::spawn(move || loop {
-        let connection = match Connection::new() {
-            Ok(conn) => conn,
-            Err(_) => {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                continue;
-            }
-        };
+fn subscribe_shared_mode(format: String) -> std::sync::mpsc::Receiver<ModeUpdate> {
+    let key = ModeSharedKey {
+        format: format.clone(),
+    };
 
-        let stream = match connection.subscribe([EventType::Mode]) {
-            Ok(stream) => stream,
-            Err(_) => {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                continue;
-            }
-        };
+    let (broadcaster, start_worker) = mode_registry().get_or_create(key.clone(), Broadcaster::new);
+    let receiver = broadcaster.subscribe();
 
-        for _ in stream {
-            if signal_tx.write_all(&[1]).is_err() {
+    if start_worker {
+        start_mode_worker(key, broadcaster);
+    }
+
+    receiver
+}
+
+fn start_mode_worker(key: ModeSharedKey, broadcaster: Arc<Broadcaster<ModeUpdate>>) {
+    std::thread::spawn(move || {
+        // Send initial mode state
+        broadcaster.broadcast(query_current_mode(&key.format));
+
+        loop {
+            if broadcaster.subscriber_count() == 0 {
+                mode_registry().remove(&key, &broadcaster);
                 return;
             }
-        }
 
-        std::thread::sleep(std::time::Duration::from_millis(200));
+            let connection = match Connection::new() {
+                Ok(conn) => conn,
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    continue;
+                }
+            };
+
+            let stream = match connection.subscribe([EventType::Mode]) {
+                Ok(stream) => stream,
+                Err(_) => {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    continue;
+                }
+            };
+
+            for _ in stream {
+                if broadcaster.subscriber_count() == 0 {
+                    mode_registry().remove(&key, &broadcaster);
+                    return;
+                }
+                broadcaster.broadcast(query_current_mode(&key.format));
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
     });
 }
 
-fn refresh_mode(label: &Label, format: &str) {
+fn query_current_mode(format: &str) -> ModeUpdate {
     let mut connection = match Connection::new() {
         Ok(conn) => conn,
         Err(_) => {
-            label.set_markup(&escape_markup_text("sway?"));
-            label.set_visible(true);
-            return;
+            return ModeUpdate {
+                text: escape_markup_text("sway?"),
+                visible: true,
+            };
         }
     };
 
     let mode = match connection.get_binding_state() {
         Ok(mode) => mode,
         Err(_) => {
-            label.set_markup(&escape_markup_text("sway?"));
-            label.set_visible(true);
-            return;
+            return ModeUpdate {
+                text: escape_markup_text("sway?"),
+                visible: true,
+            };
         }
     };
 
     if mode == "default" || mode.is_empty() {
-        label.set_visible(false);
-        return;
+        return ModeUpdate {
+            text: String::new(),
+            visible: false,
+        };
     }
 
     let rendered = render_markup_template(format, &[("{}", &mode)]);
-    let visible = !rendered.trim().is_empty();
-    label.set_visible(visible);
-    if visible {
-        label.set_markup(&rendered);
+    ModeUpdate {
+        visible: !rendered.trim().is_empty(),
+        text: rendered,
     }
+}
+
+fn build_mode_module(
+    format: String,
+    click_command: Option<String>,
+    class: Option<String>,
+) -> Label {
+    let label = ModuleLabel::new("sway-mode")
+        .with_css_classes(class.as_deref())
+        .with_click_command(click_command)
+        .into_label();
+
+    let receiver = subscribe_shared_mode(format);
+
+    poll_receiver(&label, receiver, |label, update| {
+        label.set_visible(update.visible);
+        if update.visible {
+            label.set_markup(&update.text);
+        }
+    });
+
+    label
 }
 
 #[cfg(test)]
