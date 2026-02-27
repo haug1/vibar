@@ -1,18 +1,17 @@
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
-use std::sync::mpsc::RecvTimeoutError;
-use std::thread;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use gtk::gdk::{MemoryFormat, MemoryTexture, Texture};
-use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, GestureClick, IconLookupFlags, Image, Orientation, Widget};
 use serde_json::Value;
 
-use crate::modules::{apply_css_classes, ModuleBuildContext, ModuleConfig};
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::{apply_css_classes, poll_receiver_widget, ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -32,6 +31,12 @@ const REFRESH_DEBOUNCE_MILLIS: u64 = 120;
 struct RenderedTrayItem {
     snapshot: TrayItemSnapshot,
     button: Button,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TraySharedKey {
+    icon_size: i32,
+    poll_interval_secs: u32,
 }
 
 pub(crate) struct TrayFactory;
@@ -69,20 +74,34 @@ fn normalized_poll_interval_secs(interval: u32) -> u32 {
     interval.max(MIN_POLL_INTERVAL_SECS)
 }
 
-fn build_tray_module(config: TrayConfig) -> GtkBox {
-    let container = GtkBox::new(Orientation::Horizontal, 4);
-    container.add_css_class("module");
-    container.add_css_class("tray");
+fn tray_registry() -> &'static BackendRegistry<TraySharedKey, Broadcaster<Vec<TrayItemSnapshot>>> {
+    static REGISTRY: OnceLock<BackendRegistry<TraySharedKey, Broadcaster<Vec<TrayItemSnapshot>>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
 
-    apply_css_classes(&container, config.class.as_deref());
+fn subscribe_shared_tray(
+    icon_size: i32,
+    poll_interval_secs: u32,
+) -> std::sync::mpsc::Receiver<Vec<TrayItemSnapshot>> {
+    let key = TraySharedKey {
+        icon_size,
+        poll_interval_secs,
+    };
 
-    let icon_size = normalized_icon_size(config.icon_size);
-    let poll_interval_secs = normalized_poll_interval_secs(config.poll_interval_secs);
+    let (broadcaster, start_worker) = tray_registry().get_or_create(key.clone(), Broadcaster::new);
+    let receiver = broadcaster.subscribe();
 
-    let (sender, receiver) = std::sync::mpsc::channel::<Vec<TrayItemSnapshot>>();
-    let (refresh_tx, refresh_rx) = mpsc::channel::<()>();
+    if start_worker {
+        start_tray_worker(key, broadcaster);
+    }
 
-    thread::spawn(move || {
+    receiver
+}
+
+fn start_tray_worker(key: TraySharedKey, broadcaster: Arc<Broadcaster<Vec<TrayItemSnapshot>>>) {
+    std::thread::spawn(move || {
+        let (refresh_tx, refresh_rx) = mpsc::channel::<()>();
         sni::start_refresh_listeners(refresh_tx);
 
         let mut last = Vec::<TrayItemSnapshot>::new();
@@ -90,8 +109,13 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
         let mut connection = sni::open_session_connection();
 
         while let Ok(()) | Err(RecvTimeoutError::Timeout) =
-            refresh_rx.recv_timeout(Duration::from_secs(u64::from(poll_interval_secs)))
+            refresh_rx.recv_timeout(Duration::from_secs(u64::from(key.poll_interval_secs)))
         {
+            if broadcaster.subscriber_count() == 0 {
+                tray_registry().remove(&key, &broadcaster);
+                return;
+            }
+
             coalesce_refresh_events(&refresh_rx, Duration::from_millis(REFRESH_DEBOUNCE_MILLIS));
 
             if connection.is_none() {
@@ -105,41 +129,14 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
                 .unwrap_or_default();
 
             if snapshot != last {
-                if sender.send(snapshot.clone()).is_err() {
-                    return;
-                }
+                broadcaster.broadcast(snapshot.clone());
                 last = snapshot;
             }
         }
+
+        // refresh_rx disconnected — all listener threads exited
+        tray_registry().remove(&key, &broadcaster);
     });
-
-    gtk::glib::timeout_add_local(Duration::from_millis(250), {
-        let container_weak = container.downgrade();
-        let mut current = Vec::<TrayItemSnapshot>::new();
-        let mut rendered = HashMap::<String, RenderedTrayItem>::new();
-
-        move || {
-            let Some(container) = container_weak.upgrade() else {
-                return ControlFlow::Break;
-            };
-
-            let mut next = None;
-            while let Ok(snapshot) = receiver.try_recv() {
-                next = Some(snapshot);
-            }
-
-            if let Some(snapshot) = next {
-                if snapshot != current {
-                    render_tray_items(&container, &snapshot, icon_size, &mut rendered);
-                    current = snapshot;
-                }
-            }
-
-            ControlFlow::Continue
-        }
-    });
-
-    container
 }
 
 fn coalesce_refresh_events(refresh_rx: &mpsc::Receiver<()>, debounce: Duration) {
@@ -153,6 +150,32 @@ fn coalesce_refresh_events(refresh_rx: &mpsc::Receiver<()>, debounce: Duration) 
             Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) => break,
         }
     }
+}
+
+fn build_tray_module(config: TrayConfig) -> GtkBox {
+    let container = GtkBox::new(Orientation::Horizontal, 4);
+    container.add_css_class("module");
+    container.add_css_class("tray");
+
+    apply_css_classes(&container, config.class.as_deref());
+
+    let icon_size = normalized_icon_size(config.icon_size);
+    let poll_interval_secs = normalized_poll_interval_secs(config.poll_interval_secs);
+
+    let receiver = subscribe_shared_tray(icon_size, poll_interval_secs);
+
+    poll_receiver_widget(&container, receiver, {
+        let mut current = Vec::<TrayItemSnapshot>::new();
+        let mut rendered = HashMap::<String, RenderedTrayItem>::new();
+        move |container, snapshot| {
+            if snapshot != current {
+                render_tray_items(container, &snapshot, icon_size, &mut rendered);
+                current = snapshot;
+            }
+        }
+    });
+
+    container
 }
 
 fn render_tray_items(
