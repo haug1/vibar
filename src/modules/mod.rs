@@ -13,9 +13,12 @@ pub(crate) mod sway;
 pub(crate) mod temperature;
 pub(crate) mod tray;
 
+use std::time::Duration;
+
 use gtk::gdk;
+use gtk::glib::ControlFlow;
 use gtk::prelude::*;
-use gtk::{GestureClick, Widget};
+use gtk::{GestureClick, Label, Widget};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -126,6 +129,67 @@ pub(crate) fn render_markup_template(template: &str, replacements: &[(&str, &str
         rendered = rendered.replace(placeholder, &escape_markup_text(value));
     }
     rendered
+}
+
+/// Builder that consolidates repeated label setup across modules.
+#[allow(dead_code)]
+pub(crate) struct ModuleLabel {
+    module_class: &'static str,
+    user_classes: Option<String>,
+    click_command: Option<String>,
+}
+
+#[allow(dead_code)]
+impl ModuleLabel {
+    pub(crate) fn new(module_class: &'static str) -> Self {
+        Self {
+            module_class,
+            user_classes: None,
+            click_command: None,
+        }
+    }
+
+    pub(crate) fn with_css_classes(mut self, classes: Option<&str>) -> Self {
+        self.user_classes = classes.map(ToOwned::to_owned);
+        self
+    }
+
+    pub(crate) fn with_click_command(mut self, command: Option<String>) -> Self {
+        self.click_command = command;
+        self
+    }
+
+    pub(crate) fn into_label(self) -> Label {
+        let label = Label::new(None);
+        label.add_css_class("module");
+        label.add_css_class(self.module_class);
+        apply_css_classes(&label, self.user_classes.as_deref());
+        attach_primary_click_command(&label, self.click_command);
+        label
+    }
+}
+
+/// Consolidates the common `timeout_add_local(200ms)` + `label_weak.upgrade()`
+/// + `try_recv` loop into a single call.
+///
+/// `apply_fn` receives the label and each update value, and is responsible for
+/// setting markup, visibility, CSS classes, etc.
+#[allow(dead_code)]
+pub(crate) fn poll_receiver<U: 'static>(
+    label: &Label,
+    receiver: std::sync::mpsc::Receiver<U>,
+    apply_fn: impl Fn(&Label, U) + 'static,
+) {
+    let label_weak = label.downgrade();
+    gtk::glib::timeout_add_local(Duration::from_millis(200), move || {
+        let Some(label) = label_weak.upgrade() else {
+            return ControlFlow::Break;
+        };
+        while let Ok(update) = receiver.try_recv() {
+            apply_fn(&label, update);
+        }
+        ControlFlow::Continue
+    });
 }
 
 #[cfg(test)]
