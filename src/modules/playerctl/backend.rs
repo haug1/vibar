@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::Arc;
 use std::time::Duration;
 
 use zbus::blocking::fdo::DBusProxy;
@@ -7,6 +8,8 @@ use zbus::blocking::{Connection, MessageIterator, Proxy};
 use zbus::message::Type as MessageType;
 use zbus::zvariant::{ObjectPath, OwnedValue};
 use zbus::MatchRule;
+
+use crate::modules::broadcaster::Broadcaster;
 
 use super::model::{
     matches_player_filter, metadata_artist, metadata_i64, metadata_object_path_string,
@@ -48,35 +51,37 @@ pub(super) fn call_set_position(
     Ok(())
 }
 
-pub(super) fn run_event_backend(ui_sender: Sender<BackendUpdate>, player_filter: Option<String>) {
+pub(super) fn run_event_backend(
+    broadcaster: &Arc<Broadcaster<BackendUpdate>>,
+    player_filter: Option<String>,
+) {
     let (trigger_tx, trigger_rx) = mpsc::channel::<()>();
 
     start_name_owner_listener(trigger_tx.clone());
     start_properties_listener(trigger_tx);
 
-    if !publish_snapshot(&ui_sender, player_filter.as_deref()) {
-        return;
-    }
+    publish_snapshot(broadcaster, player_filter.as_deref());
 
     while let Ok(_) | Err(RecvTimeoutError::Timeout) =
         trigger_rx.recv_timeout(Duration::from_millis(500))
     {
-        if !publish_snapshot(&ui_sender, player_filter.as_deref()) {
+        if broadcaster.subscriber_count() == 0 {
             return;
         }
+        publish_snapshot(broadcaster, player_filter.as_deref());
     }
 }
 
-fn publish_snapshot(ui_sender: &Sender<BackendUpdate>, player_filter: Option<&str>) -> bool {
+fn publish_snapshot(broadcaster: &Broadcaster<BackendUpdate>, player_filter: Option<&str>) {
     let update = match query_active_player_metadata(player_filter) {
         Ok(snapshot) => BackendUpdate::Snapshot(snapshot),
         Err(err) => BackendUpdate::Error(err),
     };
 
-    ui_sender.send(update).is_ok()
+    broadcaster.broadcast(update);
 }
 
-fn start_name_owner_listener(trigger_tx: Sender<()>) {
+fn start_name_owner_listener(trigger_tx: std::sync::mpsc::Sender<()>) {
     std::thread::spawn(move || {
         let Ok(connection) = Connection::session() else {
             eprintln!("playerctl: failed to open session bus for NameOwnerChanged listener");
@@ -104,7 +109,7 @@ fn start_name_owner_listener(trigger_tx: Sender<()>) {
     });
 }
 
-fn start_properties_listener(trigger_tx: Sender<()>) {
+fn start_properties_listener(trigger_tx: std::sync::mpsc::Sender<()>) {
     std::thread::spawn(move || {
         let Ok(connection) = Connection::session() else {
             eprintln!("playerctl: failed to open session bus for PropertiesChanged listener");
