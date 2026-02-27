@@ -122,11 +122,11 @@ fn default_battery_interval() -> u32 {
 
 fn default_battery_icons() -> Vec<String> {
     vec![
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
     ]
 }
 

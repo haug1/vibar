@@ -133,11 +133,11 @@ fn default_temperature_interval() -> u32 {
 
 fn default_temperature_icons() -> Vec<String> {
     vec![
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
     ]
 }
 
