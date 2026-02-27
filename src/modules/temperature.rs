@@ -1,15 +1,16 @@
 use std::fs;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
-    ModuleBuildContext, ModuleConfig,
+    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
+    ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -65,6 +66,32 @@ struct TemperatureUiUpdate {
     visible: bool,
 }
 
+#[derive(Debug, Clone)]
+struct TemperatureRuntimeConfig {
+    sensor_path: String,
+    base_format: String,
+    warning_format: Option<String>,
+    critical_format: Option<String>,
+    warning_threshold: Option<i32>,
+    critical_threshold: Option<i32>,
+    format_icons: Vec<String>,
+    interval_secs: u32,
+    click_command: Option<String>,
+    class: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TemperatureSharedKey {
+    sensor_path: String,
+    base_format: String,
+    warning_format: Option<String>,
+    critical_format: Option<String>,
+    warning_threshold: Option<i32>,
+    critical_threshold: Option<i32>,
+    format_icons: Vec<String>,
+    interval_secs: u32,
+}
+
 pub(crate) struct TemperatureFactory;
 
 pub(crate) const FACTORY: TemperatureFactory = TemperatureFactory;
@@ -100,31 +127,17 @@ impl ModuleFactory for TemperatureFactory {
     }
 }
 
-#[derive(Debug, Clone)]
-struct TemperatureRuntimeConfig {
-    sensor_path: String,
-    base_format: String,
-    warning_format: Option<String>,
-    critical_format: Option<String>,
-    warning_threshold: Option<i32>,
-    critical_threshold: Option<i32>,
-    format_icons: Vec<String>,
-    interval_secs: u32,
-    click_command: Option<String>,
-    class: Option<String>,
-}
-
 fn default_temperature_interval() -> u32 {
     DEFAULT_TEMPERATURE_INTERVAL_SECS
 }
 
 fn default_temperature_icons() -> Vec<String> {
     vec![
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
     ]
 }
 
@@ -156,23 +169,45 @@ fn resolve_temperature_sensor_path(
     format!("/sys/class/thermal/thermal_zone{zone}/temp")
 }
 
-fn build_temperature_module(config: TemperatureRuntimeConfig) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("temperature");
+fn temperature_registry(
+) -> &'static BackendRegistry<TemperatureSharedKey, Broadcaster<TemperatureUiUpdate>> {
+    static REGISTRY: OnceLock<
+        BackendRegistry<TemperatureSharedKey, Broadcaster<TemperatureUiUpdate>>,
+    > = OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
 
-    apply_css_classes(&label, config.class.as_deref());
-    attach_primary_click_command(&label, config.click_command);
+fn subscribe_shared_temperature(
+    config: &TemperatureRuntimeConfig,
+) -> std::sync::mpsc::Receiver<TemperatureUiUpdate> {
+    let key = TemperatureSharedKey {
+        sensor_path: config.sensor_path.clone(),
+        base_format: config.base_format.clone(),
+        warning_format: config.warning_format.clone(),
+        critical_format: config.critical_format.clone(),
+        warning_threshold: config.warning_threshold,
+        critical_threshold: config.critical_threshold,
+        format_icons: config.format_icons.clone(),
+        interval_secs: config.interval_secs,
+    };
 
-    let effective_interval_secs = normalized_temperature_interval(config.interval_secs);
-    if effective_interval_secs != config.interval_secs {
-        eprintln!(
-            "temperature interval_secs={} is too low; clamping to {} second",
-            config.interval_secs, effective_interval_secs
-        );
+    let (broadcaster, start_worker) =
+        temperature_registry().get_or_create(key.clone(), Broadcaster::new);
+    let receiver = broadcaster.subscribe();
+
+    if start_worker {
+        start_temperature_worker(key, config.clone(), broadcaster);
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<TemperatureUiUpdate>();
+    receiver
+}
+
+fn start_temperature_worker(
+    key: TemperatureSharedKey,
+    config: TemperatureRuntimeConfig,
+    broadcaster: Arc<Broadcaster<TemperatureUiUpdate>>,
+) {
+    let interval = Duration::from_secs(u64::from(config.interval_secs));
     std::thread::spawn(move || loop {
         let update = match read_temperature_reading(&config.sensor_path) {
             Ok(reading) => {
@@ -207,30 +242,45 @@ fn build_temperature_module(config: TemperatureRuntimeConfig) -> Label {
             },
         };
 
-        if sender.send(update).is_err() {
+        broadcaster.broadcast(update);
+        if broadcaster.subscriber_count() == 0 {
+            temperature_registry().remove(&key, &broadcaster);
             return;
         }
-        std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
+        std::thread::sleep(interval);
     });
+}
 
-    let label_weak = label.downgrade();
-    gtk::glib::timeout_add_local(Duration::from_millis(200), {
-        move || {
-            let Some(label) = label_weak.upgrade() else {
-                return ControlFlow::Break;
-            };
-            while let Ok(update) = receiver.try_recv() {
-                label.set_visible(update.visible);
-                if update.visible {
-                    label.set_markup(&update.text);
-                }
-                for class_name in TEMPERATURE_STATE_CLASSES {
-                    label.remove_css_class(class_name);
-                }
-                label.add_css_class(update.state_class);
-            }
-            ControlFlow::Continue
+fn build_temperature_module(config: TemperatureRuntimeConfig) -> Label {
+    let label = ModuleLabel::new("temperature")
+        .with_css_classes(config.class.as_deref())
+        .with_click_command(config.click_command.clone())
+        .into_label();
+
+    let effective_interval_secs = normalized_temperature_interval(config.interval_secs);
+    if effective_interval_secs != config.interval_secs {
+        eprintln!(
+            "temperature interval_secs={} is too low; clamping to {} second",
+            config.interval_secs, effective_interval_secs
+        );
+    }
+
+    let config = TemperatureRuntimeConfig {
+        interval_secs: effective_interval_secs,
+        ..config
+    };
+
+    let receiver = subscribe_shared_temperature(&config);
+
+    poll_receiver(&label, receiver, |label, update| {
+        label.set_visible(update.visible);
+        if update.visible {
+            label.set_markup(&update.text);
         }
+        for class_name in TEMPERATURE_STATE_CLASSES {
+            label.remove_css_class(class_name);
+        }
+        label.add_css_class(update.state_class);
     });
 
     label
