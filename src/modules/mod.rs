@@ -189,6 +189,28 @@ pub(crate) fn poll_receiver<U: 'static>(
     });
 }
 
+/// Like [`poll_receiver`] but works with any widget type (e.g. `GtkBox`,
+/// `Overlay`) instead of only `Label`.
+pub(crate) fn poll_receiver_widget<W, U>(
+    widget: &W,
+    receiver: std::sync::mpsc::Receiver<U>,
+    mut apply_fn: impl FnMut(&W, U) + 'static,
+) where
+    W: IsA<Widget> + Clone + 'static,
+    U: 'static,
+{
+    let widget_weak = widget.downgrade();
+    gtk::glib::timeout_add_local(Duration::from_millis(200), move || {
+        let Some(widget) = widget_weak.upgrade() else {
+            return ControlFlow::Break;
+        };
+        while let Ok(update) = receiver.try_recv() {
+            apply_fn(&widget, update);
+        }
+        ControlFlow::Continue
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::Map;
