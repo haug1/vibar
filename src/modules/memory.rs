@@ -1,15 +1,16 @@
 use std::fs;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
-    ModuleBuildContext, ModuleConfig,
+    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
+    ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -39,6 +40,17 @@ struct MemoryStatus {
     used_bytes: u64,
     free_bytes: u64,
     available_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+struct MemoryUpdate {
+    text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct MemorySharedKey {
+    format: String,
+    interval_secs: u32,
 }
 
 pub(crate) struct MemoryFactory;
@@ -81,18 +93,58 @@ pub(crate) fn normalized_memory_interval(interval_secs: u32) -> u32 {
     interval_secs.max(MIN_MEMORY_INTERVAL_SECS)
 }
 
+fn memory_registry() -> &'static BackendRegistry<MemorySharedKey, Broadcaster<MemoryUpdate>> {
+    static REGISTRY: OnceLock<BackendRegistry<MemorySharedKey, Broadcaster<MemoryUpdate>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
+
+fn subscribe_shared_memory(
+    format: String,
+    interval_secs: u32,
+) -> std::sync::mpsc::Receiver<MemoryUpdate> {
+    let key = MemorySharedKey {
+        format: format.clone(),
+        interval_secs,
+    };
+
+    let (broadcaster, start_worker) =
+        memory_registry().get_or_create(key.clone(), Broadcaster::new);
+    let receiver = broadcaster.subscribe();
+
+    if start_worker {
+        start_memory_worker(key, broadcaster);
+    }
+
+    receiver
+}
+
+fn start_memory_worker(key: MemorySharedKey, broadcaster: Arc<Broadcaster<MemoryUpdate>>) {
+    let interval = Duration::from_secs(u64::from(key.interval_secs));
+    std::thread::spawn(move || loop {
+        let text = match read_memory_status() {
+            Ok(status) => render_format(&key.format, &status),
+            Err(err) => escape_markup_text(&format!("memory error: {err}")),
+        };
+        broadcaster.broadcast(MemoryUpdate { text });
+        if broadcaster.subscriber_count() == 0 {
+            memory_registry().remove(&key, &broadcaster);
+            return;
+        }
+        std::thread::sleep(interval);
+    });
+}
+
 pub(crate) fn build_memory_module(
     format: String,
     click_command: Option<String>,
     interval_secs: u32,
     class: Option<String>,
 ) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("memory");
-
-    apply_css_classes(&label, class.as_deref());
-    attach_primary_click_command(&label, click_command);
+    let label = ModuleLabel::new("memory")
+        .with_css_classes(class.as_deref())
+        .with_click_command(click_command)
+        .into_label();
 
     let effective_interval_secs = normalized_memory_interval(interval_secs);
     if effective_interval_secs != interval_secs {
@@ -102,33 +154,13 @@ pub(crate) fn build_memory_module(
         );
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<String>();
-    let poll_format = format.clone();
-    std::thread::spawn(move || loop {
-        let text = match read_memory_status() {
-            Ok(status) => render_format(&poll_format, &status),
-            Err(err) => escape_markup_text(&format!("memory error: {err}")),
-        };
-        if sender.send(text).is_err() {
-            return;
-        }
-        std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
-    });
+    let receiver = subscribe_shared_memory(format, effective_interval_secs);
 
-    let label_weak = label.downgrade();
-    gtk::glib::timeout_add_local(Duration::from_millis(200), {
-        move || {
-            let Some(label) = label_weak.upgrade() else {
-                return ControlFlow::Break;
-            };
-            while let Ok(text) = receiver.try_recv() {
-                let visible = !text.trim().is_empty();
-                label.set_visible(visible);
-                if visible {
-                    label.set_markup(&text);
-                }
-            }
-            ControlFlow::Continue
+    poll_receiver(&label, receiver, |label, update| {
+        let visible = !update.text.trim().is_empty();
+        label.set_visible(visible);
+        if visible {
+            label.set_markup(&update.text);
         }
     });
 
