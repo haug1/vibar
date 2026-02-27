@@ -10,7 +10,9 @@ use gtk::{Align, Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
     ModuleBuildContext, ModuleConfig,
@@ -109,27 +111,21 @@ pub(crate) fn build_exec_module(
 
     attach_primary_click_command(&label, click_command);
 
-    let receiver = subscribe_shared_exec_output(command, format, effective_interval_secs, signal);
+    let subscription =
+        subscribe_shared_exec_output(command, format, effective_interval_secs, signal);
 
-    let label_weak = label.downgrade();
-    gtk::glib::timeout_add_local(std::time::Duration::from_millis(200), {
+    attach_subscription(&label, subscription, {
         let mut active_dynamic_classes: Vec<String> = Vec::new();
-        move || {
-            let Some(label) = label_weak.upgrade() else {
-                return ControlFlow::Break;
-            };
-            while let Ok(rendered) = receiver.try_recv() {
-                label.set_markup(&rendered.text);
-                label.set_visible(rendered.visible);
-                for class_name in &active_dynamic_classes {
-                    label.remove_css_class(class_name);
-                }
-                for class_name in &rendered.classes {
-                    label.add_css_class(class_name);
-                }
-                active_dynamic_classes = rendered.classes;
+        move |label, rendered| {
+            label.set_markup(&rendered.text);
+            label.set_visible(rendered.visible);
+            for class_name in &active_dynamic_classes {
+                label.remove_css_class(class_name);
             }
-            ControlFlow::Continue
+            for class_name in &rendered.classes {
+                label.add_css_class(class_name);
+            }
+            active_dynamic_classes = rendered.classes;
         }
     });
 
@@ -220,7 +216,7 @@ fn subscribe_shared_exec_output(
     format: String,
     interval_secs: u32,
     signal: Option<i32>,
-) -> std::sync::mpsc::Receiver<ExecRenderedOutput> {
+) -> Subscription<ExecRenderedOutput> {
     let key = ExecSharedKey {
         command,
         format,
@@ -719,8 +715,8 @@ mod tests {
     #[test]
     fn shared_exec_backend_broadcasts_to_all_subscribers() {
         let broadcaster = Broadcaster::new();
-        let recv_a = broadcaster.subscribe();
-        let recv_b = broadcaster.subscribe();
+        let sub_a = broadcaster.subscribe();
+        let sub_b = broadcaster.subscribe();
 
         broadcaster.broadcast(ExecRenderedOutput {
             text: "42".to_string(),
@@ -729,7 +725,8 @@ mod tests {
         });
 
         assert_eq!(
-            recv_a
+            sub_a
+                .receiver
                 .recv_timeout(Duration::from_millis(100))
                 .expect("subscriber A should receive update"),
             ExecRenderedOutput {
@@ -739,7 +736,8 @@ mod tests {
             }
         );
         assert_eq!(
-            recv_b
+            sub_b
+                .receiver
                 .recv_timeout(Duration::from_millis(100))
                 .expect("subscriber B should receive update"),
             ExecRenderedOutput {
@@ -759,10 +757,10 @@ mod tests {
             visible: true,
         });
 
-        let receiver = broadcaster.subscribe();
+        let sub = broadcaster.subscribe();
 
         assert_eq!(
-            receiver
+            sub.receiver
                 .recv_timeout(Duration::from_millis(100))
                 .expect("subscriber should receive latest value immediately"),
             ExecRenderedOutput {
@@ -776,17 +774,13 @@ mod tests {
     #[test]
     fn shared_exec_backend_drops_disconnected_subscribers() {
         let broadcaster = Broadcaster::new();
-        let (dead_sender, dead_receiver) = std::sync::mpsc::channel::<ExecRenderedOutput>();
-        drop(dead_receiver);
 
-        // Manually push the dead sender
-        broadcaster
-            .subscribers
-            .lock()
-            .expect("subscribers mutex should lock")
-            .push(dead_sender);
+        // Create a subscriber then drop it to simulate a dead one
+        let dead_sub = broadcaster.subscribe();
+        drop(dead_sub);
 
-        let _alive_receiver = broadcaster.subscribe();
+        let _alive_sub = broadcaster.subscribe();
+        assert_eq!(broadcaster.subscriber_count(), 2);
 
         broadcaster.broadcast(ExecRenderedOutput {
             text: "x".to_string(),

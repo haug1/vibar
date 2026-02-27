@@ -7,10 +7,11 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
-    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
-    ModuleLabel,
+    escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -179,7 +180,7 @@ fn temperature_registry(
 
 fn subscribe_shared_temperature(
     config: &TemperatureRuntimeConfig,
-) -> std::sync::mpsc::Receiver<TemperatureUiUpdate> {
+) -> Subscription<TemperatureUiUpdate> {
     let key = TemperatureSharedKey {
         sensor_path: config.sensor_path.clone(),
         base_format: config.base_format.clone(),
@@ -270,9 +271,9 @@ fn build_temperature_module(config: TemperatureRuntimeConfig) -> Label {
         ..config
     };
 
-    let receiver = subscribe_shared_temperature(&config);
+    let subscription = subscribe_shared_temperature(&config);
 
-    poll_receiver(&label, receiver, |label, update| {
+    attach_subscription(&label, subscription, |label, update| {
         label.set_visible(update.visible);
         if update.visible {
             label.set_markup(&update.text);
