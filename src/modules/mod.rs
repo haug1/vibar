@@ -1,5 +1,6 @@
 pub(crate) mod backlight;
 pub(crate) mod battery;
+pub(crate) mod broadcaster;
 pub(crate) mod clock;
 pub(crate) mod cpu;
 pub(crate) mod disk;
