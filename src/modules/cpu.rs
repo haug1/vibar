@@ -1,15 +1,16 @@
 use std::fs;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
-    ModuleBuildContext, ModuleConfig,
+    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
+    ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -52,6 +53,12 @@ struct CpuUpdate {
     usage_class: &'static str,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct CpuSharedKey {
+    format: String,
+    interval_secs: u32,
+}
+
 pub(crate) struct CpuFactory;
 
 pub(crate) const FACTORY: CpuFactory = CpuFactory;
@@ -92,29 +99,34 @@ pub(crate) fn normalized_cpu_interval(interval_secs: u32) -> u32 {
     interval_secs.max(MIN_CPU_INTERVAL_SECS)
 }
 
-pub(crate) fn build_cpu_module(
+fn cpu_registry() -> &'static BackendRegistry<CpuSharedKey, Broadcaster<CpuUpdate>> {
+    static REGISTRY: OnceLock<BackendRegistry<CpuSharedKey, Broadcaster<CpuUpdate>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
+
+fn subscribe_shared_cpu(
     format: String,
-    click_command: Option<String>,
     interval_secs: u32,
-    class: Option<String>,
-) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("cpu");
+) -> std::sync::mpsc::Receiver<CpuUpdate> {
+    let key = CpuSharedKey {
+        format: format.clone(),
+        interval_secs,
+    };
 
-    apply_css_classes(&label, class.as_deref());
-    attach_primary_click_command(&label, click_command);
+    let (broadcaster, start_worker) = cpu_registry().get_or_create(key.clone(), Broadcaster::new);
 
-    let effective_interval_secs = normalized_cpu_interval(interval_secs);
-    if effective_interval_secs != interval_secs {
-        eprintln!(
-            "cpu interval_secs={} is too low; clamping to {} second",
-            interval_secs, effective_interval_secs
-        );
+    let receiver = broadcaster.subscribe();
+
+    if start_worker {
+        start_cpu_worker(key, broadcaster);
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<CpuUpdate>();
-    let poll_format = format.clone();
+    receiver
+}
+
+fn start_cpu_worker(key: CpuSharedKey, broadcaster: Arc<Broadcaster<CpuUpdate>>) {
+    let interval = Duration::from_secs(u64::from(key.interval_secs));
     std::thread::spawn(move || {
         let mut previous: Option<CpuSnapshot> = None;
 
@@ -129,7 +141,7 @@ pub(crate) fn build_cpu_module(
                     let usage = cpu_usage_between(prev, current);
                     previous = Some(current);
                     CpuUpdate {
-                        text: render_format(&poll_format, usage),
+                        text: render_format(&key.format, usage),
                         usage_class: usage_css_class(usage),
                     }
                 }
@@ -139,32 +151,47 @@ pub(crate) fn build_cpu_module(
                 },
             };
 
-            if sender.send(update).is_err() {
+            broadcaster.broadcast(update);
+            if broadcaster.subscriber_count() == 0 {
+                cpu_registry().remove(&key, &broadcaster);
                 return;
             }
-            std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
+            std::thread::sleep(interval);
         }
     });
+}
 
-    let label_weak = label.downgrade();
-    gtk::glib::timeout_add_local(Duration::from_millis(200), {
-        move || {
-            let Some(label) = label_weak.upgrade() else {
-                return ControlFlow::Break;
-            };
-            while let Ok(update) = receiver.try_recv() {
-                let visible = !update.text.trim().is_empty();
-                label.set_visible(visible);
-                if visible {
-                    label.set_markup(&update.text);
-                }
-                for class_name in CPU_USAGE_CLASSES {
-                    label.remove_css_class(class_name);
-                }
-                label.add_css_class(update.usage_class);
-            }
-            ControlFlow::Continue
+pub(crate) fn build_cpu_module(
+    format: String,
+    click_command: Option<String>,
+    interval_secs: u32,
+    class: Option<String>,
+) -> Label {
+    let label = ModuleLabel::new("cpu")
+        .with_css_classes(class.as_deref())
+        .with_click_command(click_command)
+        .into_label();
+
+    let effective_interval_secs = normalized_cpu_interval(interval_secs);
+    if effective_interval_secs != interval_secs {
+        eprintln!(
+            "cpu interval_secs={} is too low; clamping to {} second",
+            interval_secs, effective_interval_secs
+        );
+    }
+
+    let receiver = subscribe_shared_cpu(format, effective_interval_secs);
+
+    poll_receiver(&label, receiver, |label, update| {
+        let visible = !update.text.trim().is_empty();
+        label.set_visible(visible);
+        if visible {
+            label.set_markup(&update.text);
         }
+        for class_name in CPU_USAGE_CLASSES {
+            label.remove_css_class(class_name);
+        }
+        label.add_css_class(update.usage_class);
     });
 
     label
