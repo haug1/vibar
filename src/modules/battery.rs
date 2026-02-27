@@ -1,8 +1,7 @@
 use std::fs;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
@@ -10,9 +9,10 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
-    ModuleBuildContext, ModuleConfig,
+    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
+    ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -21,7 +21,6 @@ const POWER_SUPPLY_PATH: &str = "/sys/class/power_supply";
 const MIN_BATTERY_INTERVAL_SECS: u32 = 1;
 const DEFAULT_BATTERY_INTERVAL_SECS: u32 = 10;
 const DEFAULT_BATTERY_FORMAT: &str = "{capacity}% {icon}";
-const BACKEND_WAKE_POLL_MILLIS: u64 = 50;
 const BATTERY_LEVEL_CLASSES: [&str; 5] = [
     "battery-critical",
     "battery-low",
@@ -81,6 +80,14 @@ struct UdevMonitor {
     monitor: udev::MonitorSocket,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct BatterySharedKey {
+    device: Option<String>,
+    format: String,
+    format_icons: Vec<String>,
+    interval_secs: u32,
+}
+
 pub(crate) struct BatteryFactory;
 
 pub(crate) const FACTORY: BatteryFactory = BatteryFactory;
@@ -115,11 +122,11 @@ fn default_battery_interval() -> u32 {
 
 fn default_battery_icons() -> Vec<String> {
     vec![
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
+        "".to_string(),
     ]
 }
 
@@ -139,6 +146,55 @@ pub(crate) fn normalized_battery_interval(interval_secs: u32) -> u32 {
     interval_secs.max(MIN_BATTERY_INTERVAL_SECS)
 }
 
+fn battery_registry() -> &'static BackendRegistry<BatterySharedKey, Broadcaster<BatteryUiUpdate>> {
+    static REGISTRY: OnceLock<BackendRegistry<BatterySharedKey, Broadcaster<BatteryUiUpdate>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
+
+fn subscribe_shared_battery(
+    format: String,
+    preferred_device: Option<String>,
+    format_icons: Vec<String>,
+    interval_secs: u32,
+) -> std::sync::mpsc::Receiver<BatteryUiUpdate> {
+    let key = BatterySharedKey {
+        device: preferred_device.clone(),
+        format: format.clone(),
+        format_icons: format_icons.clone(),
+        interval_secs,
+    };
+
+    let (broadcaster, start_worker) =
+        battery_registry().get_or_create(key.clone(), Broadcaster::new);
+    let receiver = broadcaster.subscribe();
+
+    if start_worker {
+        start_battery_worker(key, format, preferred_device, format_icons, broadcaster);
+    }
+
+    receiver
+}
+
+fn start_battery_worker(
+    key: BatterySharedKey,
+    format: String,
+    preferred_device: Option<String>,
+    format_icons: Vec<String>,
+    broadcaster: Arc<Broadcaster<BatteryUiUpdate>>,
+) {
+    std::thread::spawn(move || {
+        run_battery_backend_loop(
+            &key,
+            &broadcaster,
+            &format,
+            preferred_device,
+            &format_icons,
+            key.interval_secs,
+        );
+    });
+}
+
 pub(crate) fn build_battery_module(
     format: String,
     click_command: Option<String>,
@@ -147,12 +203,10 @@ pub(crate) fn build_battery_module(
     format_icons: Vec<String>,
     class: Option<String>,
 ) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("battery");
-
-    apply_css_classes(&label, class.as_deref());
-    attach_primary_click_command(&label, click_command);
+    let label = ModuleLabel::new("battery")
+        .with_css_classes(class.as_deref())
+        .with_click_command(click_command)
+        .into_label();
 
     let effective_interval_secs = normalized_battery_interval(interval_secs);
     if effective_interval_secs != interval_secs {
@@ -162,25 +216,15 @@ pub(crate) fn build_battery_module(
         );
     }
 
-    let main_context = gtk::glib::MainContext::default();
-    let label_weak = gtk::glib::SendWeakRef::from(label.downgrade());
-    let alive = Arc::new(AtomicBool::new(true));
-    std::thread::spawn({
-        let alive = alive.clone();
-        move || {
-            let ui = UiHandle {
-                main_context,
-                label_weak,
-                alive,
-            };
-            run_battery_backend_loop(
-                ui,
-                format,
-                preferred_device,
-                format_icons,
-                effective_interval_secs,
-            );
-        }
+    let receiver = subscribe_shared_battery(
+        format,
+        preferred_device,
+        format_icons,
+        effective_interval_secs,
+    );
+
+    poll_receiver(&label, receiver, |label, update| {
+        apply_battery_ui_update(label, &update);
     });
 
     label
@@ -203,35 +247,12 @@ fn apply_battery_ui_update(label: &Label, update: &BatteryUiUpdate) {
     label.add_css_class(update.status_class);
 }
 
-struct UiHandle {
-    main_context: gtk::glib::MainContext,
-    label_weak: gtk::glib::SendWeakRef<Label>,
-    alive: Arc<AtomicBool>,
-}
-
-impl UiHandle {
-    fn is_alive(&self) -> bool {
-        self.alive.load(Ordering::Relaxed)
-    }
-
-    fn dispatch(&self, update: BatteryUiUpdate) {
-        let label_weak = self.label_weak.clone();
-        let alive = self.alive.clone();
-        std::mem::drop(self.main_context.spawn(async move {
-            if let Some(label) = label_weak.upgrade() {
-                apply_battery_ui_update(&label, &update);
-            } else {
-                alive.store(false, Ordering::Relaxed);
-            }
-        }));
-    }
-}
-
 fn run_battery_backend_loop(
-    ui: UiHandle,
-    format: String,
+    key: &BatterySharedKey,
+    broadcaster: &Arc<Broadcaster<BatteryUiUpdate>>,
+    format: &str,
     preferred_device: Option<String>,
-    format_icons: Vec<String>,
+    format_icons: &[String],
     interval_secs: u32,
 ) {
     let resync_interval = Duration::from_secs(u64::from(interval_secs));
@@ -246,22 +267,22 @@ fn run_battery_backend_loop(
     };
 
     backend.refresh_from_sysfs();
-    ui.dispatch(backend.build_ui_update(&format, &format_icons));
+    broadcaster.broadcast(backend.build_ui_update(format, format_icons));
 
     loop {
-        if !ui.is_alive() {
+        if broadcaster.subscriber_count() == 0 {
+            battery_registry().remove(key, broadcaster);
             return;
         }
 
-        let wake_timeout =
-            millis_until_next_resync(last_resync, resync_interval).min(BACKEND_WAKE_POLL_MILLIS);
+        let wake_timeout = millis_until_next_resync(last_resync, resync_interval).min(50);
 
         if let Some(monitor) = udev_monitor.as_mut() {
             match wait_for_readable_fd(monitor.fd(), wake_timeout) {
                 Ok(true) => {
                     if monitor.drain_events() {
                         backend.refresh_from_sysfs();
-                        ui.dispatch(backend.build_ui_update(&format, &format_icons));
+                        broadcaster.broadcast(backend.build_ui_update(format, format_icons));
                     }
                 }
                 Ok(false) => {}
@@ -276,7 +297,7 @@ fn run_battery_backend_loop(
 
         if last_resync.elapsed() >= resync_interval {
             backend.refresh_from_sysfs();
-            ui.dispatch(backend.build_ui_update(&format, &format_icons));
+            broadcaster.broadcast(backend.build_ui_update(format, format_icons));
             last_resync = Instant::now();
         }
     }
