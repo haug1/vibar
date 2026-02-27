@@ -1,6 +1,8 @@
 use std::fs;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
@@ -162,15 +164,23 @@ pub(crate) fn build_battery_module(
 
     let main_context = gtk::glib::MainContext::default();
     let label_weak = gtk::glib::SendWeakRef::from(label.downgrade());
-    std::thread::spawn(move || {
-        run_battery_backend_loop(
-            main_context,
-            label_weak,
-            format,
-            preferred_device,
-            format_icons,
-            effective_interval_secs,
-        );
+    let alive = Arc::new(AtomicBool::new(true));
+    std::thread::spawn({
+        let alive = alive.clone();
+        move || {
+            let ui = UiHandle {
+                main_context,
+                label_weak,
+                alive,
+            };
+            run_battery_backend_loop(
+                ui,
+                format,
+                preferred_device,
+                format_icons,
+                effective_interval_secs,
+            );
+        }
     });
 
     label
@@ -193,18 +203,37 @@ fn apply_battery_ui_update(label: &Label, update: &BatteryUiUpdate) {
     label.add_css_class(update.status_class);
 }
 
-fn run_battery_backend_loop(
+struct UiHandle {
     main_context: gtk::glib::MainContext,
     label_weak: gtk::glib::SendWeakRef<Label>,
+    alive: Arc<AtomicBool>,
+}
+
+impl UiHandle {
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Relaxed)
+    }
+
+    fn dispatch(&self, update: BatteryUiUpdate) {
+        let label_weak = self.label_weak.clone();
+        let alive = self.alive.clone();
+        std::mem::drop(self.main_context.spawn(async move {
+            if let Some(label) = label_weak.upgrade() {
+                apply_battery_ui_update(&label, &update);
+            } else {
+                alive.store(false, Ordering::Relaxed);
+            }
+        }));
+    }
+}
+
+fn run_battery_backend_loop(
+    ui: UiHandle,
     format: String,
     preferred_device: Option<String>,
     format_icons: Vec<String>,
     interval_secs: u32,
 ) {
-    if label_weak.upgrade().is_none() {
-        return;
-    }
-
     let resync_interval = Duration::from_secs(u64::from(interval_secs));
     let mut last_resync = Instant::now();
     let mut backend = BatteryBackend::new(preferred_device);
@@ -217,14 +246,10 @@ fn run_battery_backend_loop(
     };
 
     backend.refresh_from_sysfs();
-    dispatch_battery_ui_update(
-        &main_context,
-        &label_weak,
-        backend.build_ui_update(&format, &format_icons),
-    );
+    ui.dispatch(backend.build_ui_update(&format, &format_icons));
 
     loop {
-        if label_weak.upgrade().is_none() {
+        if !ui.is_alive() {
             return;
         }
 
@@ -236,11 +261,7 @@ fn run_battery_backend_loop(
                 Ok(true) => {
                     if monitor.drain_events() {
                         backend.refresh_from_sysfs();
-                        dispatch_battery_ui_update(
-                            &main_context,
-                            &label_weak,
-                            backend.build_ui_update(&format, &format_icons),
-                        );
+                        ui.dispatch(backend.build_ui_update(&format, &format_icons));
                     }
                 }
                 Ok(false) => {}
@@ -255,27 +276,10 @@ fn run_battery_backend_loop(
 
         if last_resync.elapsed() >= resync_interval {
             backend.refresh_from_sysfs();
-            dispatch_battery_ui_update(
-                &main_context,
-                &label_weak,
-                backend.build_ui_update(&format, &format_icons),
-            );
+            ui.dispatch(backend.build_ui_update(&format, &format_icons));
             last_resync = Instant::now();
         }
     }
-}
-
-fn dispatch_battery_ui_update(
-    main_context: &gtk::glib::MainContext,
-    label_weak: &gtk::glib::SendWeakRef<Label>,
-    update: BatteryUiUpdate,
-) {
-    let label_weak = label_weak.clone();
-    std::mem::drop(main_context.spawn(async move {
-        if let Some(label) = label_weak.upgrade() {
-            apply_battery_ui_update(&label, &update);
-        }
-    }));
 }
 
 fn millis_until_next_resync(last_resync: Instant, interval: Duration) -> u64 {
