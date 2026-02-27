@@ -5,10 +5,7 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::modules::{
-    apply_css_classes, attach_primary_click_command, render_markup_template, ModuleBuildContext,
-    ModuleConfig,
-};
+use crate::modules::{render_markup_template, ModuleBuildContext, ModuleConfig, ModuleLabel};
 
 use super::ModuleFactory;
 
@@ -77,11 +74,10 @@ pub(crate) fn build_clock_module(
     click_command: Option<String>,
     class: Option<String>,
 ) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("clock");
-    apply_css_classes(&label, class.as_deref());
-    attach_primary_click_command(&label, click_command);
+    let label = ModuleLabel::new("clock")
+        .with_css_classes(class.as_deref())
+        .with_click_command(click_command)
+        .into_label();
 
     let (template, time_fmt) = resolve_clock_formats(format, time_format);
 
