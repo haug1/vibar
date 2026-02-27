@@ -10,6 +10,7 @@ use gtk::{Align, Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
     ModuleBuildContext, ModuleConfig,
@@ -175,40 +176,18 @@ struct ExecRenderedOutput {
     visible: bool,
 }
 
-#[derive(Default)]
+/// Shared exec backend wrapping Broadcaster with signal-based refresh support.
 struct SharedExecBackend {
-    latest: Mutex<Option<ExecRenderedOutput>>,
-    subscribers: Mutex<Vec<std::sync::mpsc::Sender<ExecRenderedOutput>>>,
+    broadcaster: Broadcaster<ExecRenderedOutput>,
     refresh_sender: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 impl SharedExecBackend {
-    fn add_subscriber(&self, sender: std::sync::mpsc::Sender<ExecRenderedOutput>) {
-        if let Some(text) = self
-            .latest
-            .lock()
-            .expect("exec backend latest mutex poisoned")
-            .clone()
-        {
-            let _ = sender.send(text);
+    fn new() -> Self {
+        Self {
+            broadcaster: Broadcaster::new(),
+            refresh_sender: Mutex::new(None),
         }
-
-        self.subscribers
-            .lock()
-            .expect("exec backend subscribers mutex poisoned")
-            .push(sender);
-    }
-
-    fn broadcast(&self, text: ExecRenderedOutput) {
-        *self
-            .latest
-            .lock()
-            .expect("exec backend latest mutex poisoned") = Some(text.clone());
-
-        self.subscribers
-            .lock()
-            .expect("exec backend subscribers mutex poisoned")
-            .retain(|sender| sender.send(text.clone()).is_ok());
     }
 
     fn set_refresh_sender(&self, sender: std::sync::mpsc::Sender<()>) {
@@ -229,20 +208,11 @@ impl SharedExecBackend {
             let _ = sender.send(());
         }
     }
-
-    fn subscriber_count(&self) -> usize {
-        self.subscribers
-            .lock()
-            .expect("exec backend subscribers mutex poisoned")
-            .len()
-    }
 }
 
-type SharedExecMap = HashMap<ExecSharedKey, Arc<SharedExecBackend>>;
-
-fn shared_exec_backends() -> &'static Mutex<SharedExecMap> {
-    static SHARED_EXEC_BACKENDS: OnceLock<Mutex<SharedExecMap>> = OnceLock::new();
-    SHARED_EXEC_BACKENDS.get_or_init(|| Mutex::new(HashMap::new()))
+fn exec_registry() -> &'static BackendRegistry<ExecSharedKey, SharedExecBackend> {
+    static REGISTRY: OnceLock<BackendRegistry<ExecSharedKey, SharedExecBackend>> = OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
 }
 
 fn subscribe_shared_exec_output(
@@ -257,24 +227,13 @@ fn subscribe_shared_exec_output(
         interval_secs,
     };
 
-    let (sender, receiver) = std::sync::mpsc::channel::<ExecRenderedOutput>();
-    let (backend, start_worker) = {
-        let mut backends = shared_exec_backends()
-            .lock()
-            .expect("exec backend map mutex poisoned");
+    let (backend, start_worker) =
+        exec_registry().get_or_create(key.clone(), SharedExecBackend::new);
 
-        if let Some(existing) = backends.get(&key) {
-            (Arc::clone(existing), false)
-        } else {
-            let backend = Arc::new(SharedExecBackend::default());
-            backends.insert(key.clone(), Arc::clone(&backend));
-            (backend, true)
-        }
-    };
+    let receiver = backend.broadcaster.subscribe();
 
-    backend.add_subscriber(sender);
     if start_worker {
-        start_shared_exec_worker(key.clone(), Arc::clone(&backend));
+        start_shared_exec_worker(key, Arc::clone(&backend));
     }
 
     if let Some(signum) = signal {
@@ -289,9 +248,11 @@ fn start_shared_exec_worker(key: ExecSharedKey, backend: Arc<SharedExecBackend>)
     backend.set_refresh_sender(refresh_sender);
 
     std::thread::spawn(move || loop {
-        backend.broadcast(run_exec_command(&key.command, &key.format));
-        if backend.subscriber_count() == 0 {
-            remove_shared_exec_backend_if_unused(&key, &backend);
+        backend
+            .broadcaster
+            .broadcast(run_exec_command(&key.command, &key.format));
+        if backend.broadcaster.subscriber_count() == 0 {
+            exec_registry().remove(&key, &backend);
             unregister_exec_backend_signals(&backend);
             return;
         }
@@ -300,17 +261,6 @@ fn start_shared_exec_worker(key: ExecSharedKey, backend: Arc<SharedExecBackend>)
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
         }
     });
-}
-
-fn remove_shared_exec_backend_if_unused(key: &ExecSharedKey, backend: &Arc<SharedExecBackend>) {
-    let mut backends = shared_exec_backends()
-        .lock()
-        .expect("exec backend map mutex poisoned");
-    if let Some(existing) = backends.get(key) {
-        if Arc::ptr_eq(existing, backend) && backend.subscriber_count() == 0 {
-            backends.remove(key);
-        }
-    }
 }
 
 #[derive(Default)]
@@ -593,7 +543,6 @@ fn apply_exec_format(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
     use std::time::Duration;
 
     use serde_json::json;
@@ -769,13 +718,11 @@ mod tests {
 
     #[test]
     fn shared_exec_backend_broadcasts_to_all_subscribers() {
-        let backend = SharedExecBackend::default();
-        let (sender_a, recv_a) = mpsc::channel();
-        let (sender_b, recv_b) = mpsc::channel();
+        let broadcaster = Broadcaster::new();
+        let recv_a = broadcaster.subscribe();
+        let recv_b = broadcaster.subscribe();
 
-        backend.add_subscriber(sender_a);
-        backend.add_subscriber(sender_b);
-        backend.broadcast(ExecRenderedOutput {
+        broadcaster.broadcast(ExecRenderedOutput {
             text: "42".to_string(),
             classes: vec!["ok".to_string()],
             visible: true,
@@ -805,15 +752,14 @@ mod tests {
 
     #[test]
     fn shared_exec_backend_replays_latest_to_new_subscriber() {
-        let backend = SharedExecBackend::default();
-        backend.broadcast(ExecRenderedOutput {
+        let broadcaster = Broadcaster::new();
+        broadcaster.broadcast(ExecRenderedOutput {
             text: "latest".to_string(),
             classes: vec!["cached".to_string()],
             visible: true,
         });
 
-        let (sender, receiver) = mpsc::channel();
-        backend.add_subscriber(sender);
+        let receiver = broadcaster.subscribe();
 
         assert_eq!(
             receiver
@@ -829,24 +775,25 @@ mod tests {
 
     #[test]
     fn shared_exec_backend_drops_disconnected_subscribers() {
-        let backend = SharedExecBackend::default();
-        let (dead_sender, dead_receiver) = mpsc::channel::<ExecRenderedOutput>();
+        let broadcaster = Broadcaster::new();
+        let (dead_sender, dead_receiver) = std::sync::mpsc::channel::<ExecRenderedOutput>();
         drop(dead_receiver);
 
-        let (alive_sender, _alive_receiver) = mpsc::channel::<ExecRenderedOutput>();
-        backend.add_subscriber(dead_sender);
-        backend.add_subscriber(alive_sender);
-        backend.broadcast(ExecRenderedOutput {
+        // Manually push the dead sender
+        broadcaster
+            .subscribers
+            .lock()
+            .expect("subscribers mutex should lock")
+            .push(dead_sender);
+
+        let _alive_receiver = broadcaster.subscribe();
+
+        broadcaster.broadcast(ExecRenderedOutput {
             text: "x".to_string(),
             classes: Vec::new(),
             visible: true,
         });
 
-        let subscriber_count = backend
-            .subscribers
-            .lock()
-            .expect("subscribers mutex should lock")
-            .len();
-        assert_eq!(subscriber_count, 1);
+        assert_eq!(broadcaster.subscriber_count(), 1);
     }
 }

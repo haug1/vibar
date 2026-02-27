@@ -132,14 +132,12 @@ pub(crate) fn render_markup_template(template: &str, replacements: &[(&str, &str
 }
 
 /// Builder that consolidates repeated label setup across modules.
-#[allow(dead_code)]
 pub(crate) struct ModuleLabel {
     module_class: &'static str,
     user_classes: Option<String>,
     click_command: Option<String>,
 }
 
-#[allow(dead_code)]
 impl ModuleLabel {
     pub(crate) fn new(module_class: &'static str) -> Self {
         Self {
@@ -174,7 +172,6 @@ impl ModuleLabel {
 ///
 /// `apply_fn` receives the label and each update value, and is responsible for
 /// setting markup, visibility, CSS classes, etc.
-#[allow(dead_code)]
 pub(crate) fn poll_receiver<U: 'static>(
     label: &Label,
     receiver: std::sync::mpsc::Receiver<U>,
