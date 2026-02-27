@@ -3,7 +3,6 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{
     Box as GtkBox, Button, EventControllerScroll, EventControllerScrollFlags, GestureClick, Label,
@@ -21,7 +20,9 @@ use pulse::volume::Volume;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, attach_secondary_click_command,
     escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig,
@@ -30,7 +31,6 @@ use crate::modules::{
 use super::ModuleFactory;
 
 const MAINLOOP_IDLE_SLEEP_MILLIS: u64 = 10;
-const UI_DRAIN_INTERVAL_MILLIS: u64 = 16;
 const SESSION_RECONNECT_DELAY_SECS: u64 = 2;
 const DEFAULT_SCROLL_STEP: f64 = 1.0;
 const DEFAULT_FORMAT: &str = "{volume}% {icon}  {format_source}";
@@ -240,7 +240,7 @@ fn pulse_registry() -> &'static BackendRegistry<PulseSharedKey, SharedPulseState
 
 fn subscribe_shared_pulse(
     config: &PulseAudioConfig,
-) -> (std::sync::mpsc::Receiver<UiUpdate>, Sender<WorkerCommand>) {
+) -> (Subscription<UiUpdate>, Sender<WorkerCommand>) {
     let key = PulseSharedKey {};
 
     let render_config = config.clone();
@@ -368,7 +368,7 @@ fn build_pulseaudio_module(
 
     apply_css_classes(&label, config.class.as_deref());
 
-    let (ui_receiver, worker_tx) = subscribe_shared_pulse(&config);
+    let (ui_subscription, worker_tx) = subscribe_shared_pulse(&config);
 
     let controls_ui = if config.controls.enabled {
         let controls_ui = build_controls_ui(&label, worker_tx.clone(), config.controls.open);
@@ -425,26 +425,19 @@ fn build_pulseaudio_module(
         label.add_controller(scroll);
     }
 
-    let label_weak = label.downgrade();
-    gtk::glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
+    attach_subscription(&label, ui_subscription, {
         let controls_ui = controls_ui.clone();
-        move || {
-            let Some(label) = label_weak.upgrade() else {
-                return ControlFlow::Break;
-            };
-            while let Ok(update) = ui_receiver.try_recv() {
-                let visible = !update.label_text.trim().is_empty();
-                label.set_visible(visible);
-                if visible {
-                    label.set_markup(&update.label_text);
-                }
-                if let Some(state) = update.controls.as_ref() {
-                    if let Some(controls_ui) = controls_ui.as_ref() {
-                        refresh_controls_ui(controls_ui, state, worker_tx.clone());
-                    }
+        move |label, update| {
+            let visible = !update.label_text.trim().is_empty();
+            label.set_visible(visible);
+            if visible {
+                label.set_markup(&update.label_text);
+            }
+            if let Some(state) = update.controls.as_ref() {
+                if let Some(controls_ui) = controls_ui.as_ref() {
+                    refresh_controls_ui(controls_ui, state, worker_tx.clone());
                 }
             }
-            ControlFlow::Continue
         }
     });
 

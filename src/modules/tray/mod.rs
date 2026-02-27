@@ -10,8 +10,10 @@ use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, GestureClick, IconLookupFlags, Image, Orientation, Widget};
 use serde_json::Value;
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
-use crate::modules::{apply_css_classes, poll_receiver_widget, ModuleBuildContext, ModuleConfig};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
+use crate::modules::{apply_css_classes, ModuleBuildContext, ModuleConfig};
 
 use super::ModuleFactory;
 
@@ -83,7 +85,7 @@ fn tray_registry() -> &'static BackendRegistry<TraySharedKey, Broadcaster<Vec<Tr
 fn subscribe_shared_tray(
     icon_size: i32,
     poll_interval_secs: u32,
-) -> std::sync::mpsc::Receiver<Vec<TrayItemSnapshot>> {
+) -> Subscription<Vec<TrayItemSnapshot>> {
     let key = TraySharedKey {
         icon_size,
         poll_interval_secs,
@@ -162,9 +164,9 @@ fn build_tray_module(config: TrayConfig) -> GtkBox {
     let icon_size = normalized_icon_size(config.icon_size);
     let poll_interval_secs = normalized_poll_interval_secs(config.poll_interval_secs);
 
-    let receiver = subscribe_shared_tray(icon_size, poll_interval_secs);
+    let subscription = subscribe_shared_tray(icon_size, poll_interval_secs);
 
-    poll_receiver_widget(&container, receiver, {
+    attach_subscription(&container, subscription, {
         let mut current = Vec::<TrayItemSnapshot>::new();
         let mut rendered = HashMap::<String, RenderedTrayItem>::new();
         move |container, snapshot| {

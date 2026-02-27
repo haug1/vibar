@@ -6,10 +6,12 @@ use serde::Deserialize;
 use serde_json::Value;
 use swayipc::{Connection, EventType};
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
-    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
-    ModuleFactory, ModuleLabel,
+    escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleFactory,
+    ModuleLabel,
 };
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -74,7 +76,7 @@ fn mode_registry() -> &'static BackendRegistry<ModeSharedKey, Broadcaster<ModeUp
     REGISTRY.get_or_init(BackendRegistry::new)
 }
 
-fn subscribe_shared_mode(format: String) -> std::sync::mpsc::Receiver<ModeUpdate> {
+fn subscribe_shared_mode(format: String) -> Subscription<ModeUpdate> {
     let key = ModeSharedKey {
         format: format.clone(),
     };
@@ -174,9 +176,9 @@ fn build_mode_module(
         .with_click_command(click_command)
         .into_label();
 
-    let receiver = subscribe_shared_mode(format);
+    let subscription = subscribe_shared_mode(format);
 
-    poll_receiver(&label, receiver, |label, update| {
+    attach_subscription(&label, subscription, |label, update| {
         label.set_visible(update.visible);
         if update.visible {
             label.set_markup(&update.text);

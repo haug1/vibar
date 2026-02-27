@@ -13,10 +13,7 @@ pub(crate) mod sway;
 pub(crate) mod temperature;
 pub(crate) mod tray;
 
-use std::time::Duration;
-
 use gtk::gdk;
-use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{GestureClick, Label, Widget};
 use serde::Deserialize;
@@ -165,50 +162,6 @@ impl ModuleLabel {
         attach_primary_click_command(&label, self.click_command);
         label
     }
-}
-
-/// Consolidates the common `timeout_add_local(200ms)` + `label_weak.upgrade()`
-/// + `try_recv` loop into a single call.
-///
-/// `apply_fn` receives the label and each update value, and is responsible for
-/// setting markup, visibility, CSS classes, etc.
-pub(crate) fn poll_receiver<U: 'static>(
-    label: &Label,
-    receiver: std::sync::mpsc::Receiver<U>,
-    apply_fn: impl Fn(&Label, U) + 'static,
-) {
-    let label_weak = label.downgrade();
-    gtk::glib::timeout_add_local(Duration::from_millis(200), move || {
-        let Some(label) = label_weak.upgrade() else {
-            return ControlFlow::Break;
-        };
-        while let Ok(update) = receiver.try_recv() {
-            apply_fn(&label, update);
-        }
-        ControlFlow::Continue
-    });
-}
-
-/// Like [`poll_receiver`] but works with any widget type (e.g. `GtkBox`,
-/// `Overlay`) instead of only `Label`.
-pub(crate) fn poll_receiver_widget<W, U>(
-    widget: &W,
-    receiver: std::sync::mpsc::Receiver<U>,
-    mut apply_fn: impl FnMut(&W, U) + 'static,
-) where
-    W: IsA<Widget> + Clone + 'static,
-    U: 'static,
-{
-    let widget_weak = widget.downgrade();
-    gtk::glib::timeout_add_local(Duration::from_millis(200), move || {
-        let Some(widget) = widget_weak.upgrade() else {
-            return ControlFlow::Break;
-        };
-        while let Ok(update) = receiver.try_recv() {
-            apply_fn(&widget, update);
-        }
-        ControlFlow::Continue
-    });
 }
 
 #[cfg(test)]

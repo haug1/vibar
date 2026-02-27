@@ -7,10 +7,11 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
-    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
-    ModuleLabel,
+    escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -99,10 +100,7 @@ fn memory_registry() -> &'static BackendRegistry<MemorySharedKey, Broadcaster<Me
     REGISTRY.get_or_init(BackendRegistry::new)
 }
 
-fn subscribe_shared_memory(
-    format: String,
-    interval_secs: u32,
-) -> std::sync::mpsc::Receiver<MemoryUpdate> {
+fn subscribe_shared_memory(format: String, interval_secs: u32) -> Subscription<MemoryUpdate> {
     let key = MemorySharedKey {
         format: format.clone(),
         interval_secs,
@@ -154,9 +152,9 @@ pub(crate) fn build_memory_module(
         );
     }
 
-    let receiver = subscribe_shared_memory(format, effective_interval_secs);
+    let subscription = subscribe_shared_memory(format, effective_interval_secs);
 
-    poll_receiver(&label, receiver, |label, update| {
+    attach_subscription(&label, subscription, |label, update| {
         let visible = !update.text.trim().is_empty();
         label.set_visible(visible);
         if visible {

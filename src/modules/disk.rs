@@ -7,10 +7,11 @@ use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
+use crate::modules::broadcaster::{
+    attach_subscription, BackendRegistry, Broadcaster, Subscription,
+};
 use crate::modules::{
-    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
-    ModuleLabel,
+    escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -115,7 +116,7 @@ fn subscribe_shared_disk(
     path: String,
     format: String,
     interval_secs: u32,
-) -> std::sync::mpsc::Receiver<DiskUpdate> {
+) -> Subscription<DiskUpdate> {
     let key = DiskSharedKey {
         path,
         format,
@@ -168,9 +169,9 @@ pub(crate) fn build_disk_module(
         );
     }
 
-    let receiver = subscribe_shared_disk(path, format, effective_interval_secs);
+    let subscription = subscribe_shared_disk(path, format, effective_interval_secs);
 
-    poll_receiver(&label, receiver, |label, update| {
+    attach_subscription(&label, subscription, |label, update| {
         let visible = !update.text.trim().is_empty();
         label.set_visible(visible);
         if visible {
