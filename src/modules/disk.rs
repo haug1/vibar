@@ -1,15 +1,16 @@
 use std::process::Command;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use gtk::glib::ControlFlow;
 use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
-    apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
-    ModuleBuildContext, ModuleConfig,
+    escape_markup_text, poll_receiver, render_markup_template, ModuleBuildContext, ModuleConfig,
+    ModuleLabel,
 };
 
 use super::ModuleFactory;
@@ -42,6 +43,18 @@ struct DiskStatus {
     free_bytes: u64,
     used_bytes: u64,
     total_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+struct DiskUpdate {
+    text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct DiskSharedKey {
+    path: String,
+    format: String,
+    interval_secs: u32,
 }
 
 pub(crate) struct DiskFactory;
@@ -92,6 +105,49 @@ pub(crate) fn normalized_disk_interval(interval_secs: u32) -> u32 {
     interval_secs.max(MIN_DISK_INTERVAL_SECS)
 }
 
+fn disk_registry() -> &'static BackendRegistry<DiskSharedKey, Broadcaster<DiskUpdate>> {
+    static REGISTRY: OnceLock<BackendRegistry<DiskSharedKey, Broadcaster<DiskUpdate>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
+
+fn subscribe_shared_disk(
+    path: String,
+    format: String,
+    interval_secs: u32,
+) -> std::sync::mpsc::Receiver<DiskUpdate> {
+    let key = DiskSharedKey {
+        path,
+        format,
+        interval_secs,
+    };
+
+    let (broadcaster, start_worker) = disk_registry().get_or_create(key.clone(), Broadcaster::new);
+    let receiver = broadcaster.subscribe();
+
+    if start_worker {
+        start_disk_worker(key, broadcaster);
+    }
+
+    receiver
+}
+
+fn start_disk_worker(key: DiskSharedKey, broadcaster: Arc<Broadcaster<DiskUpdate>>) {
+    let interval = Duration::from_secs(u64::from(key.interval_secs));
+    std::thread::spawn(move || loop {
+        let text = match read_disk_status(&key.path) {
+            Ok(status) => render_format(&key.format, &status),
+            Err(err) => escape_markup_text(&format!("disk error: {err}")),
+        };
+        broadcaster.broadcast(DiskUpdate { text });
+        if broadcaster.subscriber_count() == 0 {
+            disk_registry().remove(&key, &broadcaster);
+            return;
+        }
+        std::thread::sleep(interval);
+    });
+}
+
 pub(crate) fn build_disk_module(
     path: String,
     format: String,
@@ -99,13 +155,10 @@ pub(crate) fn build_disk_module(
     interval_secs: u32,
     class: Option<String>,
 ) -> Label {
-    let label = Label::new(None);
-    label.add_css_class("module");
-    label.add_css_class("disk");
-
-    apply_css_classes(&label, class.as_deref());
-
-    attach_primary_click_command(&label, click_command);
+    let label = ModuleLabel::new("disk")
+        .with_css_classes(class.as_deref())
+        .with_click_command(click_command)
+        .into_label();
 
     let effective_interval_secs = normalized_disk_interval(interval_secs);
     if effective_interval_secs != interval_secs {
@@ -115,34 +168,13 @@ pub(crate) fn build_disk_module(
         );
     }
 
-    let (sender, receiver) = std::sync::mpsc::channel::<String>();
-    let poll_path = path.clone();
-    let poll_format = format.clone();
-    std::thread::spawn(move || loop {
-        let text = match read_disk_status(&poll_path) {
-            Ok(status) => render_format(&poll_format, &status),
-            Err(err) => escape_markup_text(&format!("disk error: {err}")),
-        };
-        if sender.send(text).is_err() {
-            return;
-        }
-        std::thread::sleep(Duration::from_secs(u64::from(effective_interval_secs)));
-    });
+    let receiver = subscribe_shared_disk(path, format, effective_interval_secs);
 
-    let label_weak = label.downgrade();
-    gtk::glib::timeout_add_local(Duration::from_millis(200), {
-        move || {
-            let Some(label) = label_weak.upgrade() else {
-                return ControlFlow::Break;
-            };
-            while let Ok(text) = receiver.try_recv() {
-                let visible = !text.trim().is_empty();
-                label.set_visible(visible);
-                if visible {
-                    label.set_markup(&text);
-                }
-            }
-            ControlFlow::Continue
+    poll_receiver(&label, receiver, |label, update| {
+        let visible = !update.text.trim().is_empty();
+        label.set_visible(visible);
+        if visible {
+            label.set_markup(&update.text);
         }
     });
 
