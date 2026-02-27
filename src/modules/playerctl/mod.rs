@@ -3,7 +3,7 @@ mod config;
 mod model;
 mod ui;
 
-use std::sync::mpsc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use gtk::glib::ControlFlow;
@@ -11,6 +11,7 @@ use gtk::prelude::*;
 use gtk::{Label, Overlay, Widget};
 use serde_json::Value;
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, escape_markup_text, ModuleBuildContext,
     ModuleConfig,
@@ -38,6 +39,11 @@ const PLAYERCTL_STATE_CLASSES: [&str; 4] = [
 ];
 pub(crate) const MODULE_TYPE: &str = "playerctl";
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PlayerctlSharedKey {
+    player: Option<String>,
+}
+
 pub(crate) struct PlayerctlFactory;
 
 pub(crate) const FACTORY: PlayerctlFactory = PlayerctlFactory;
@@ -63,6 +69,40 @@ fn parse_config(module: &ModuleConfig) -> Result<PlayerctlConfig, String> {
 
     serde_json::from_value(Value::Object(module.config.clone()))
         .map_err(|err| format!("invalid {} module config: {err}", MODULE_TYPE))
+}
+
+fn playerctl_registry() -> &'static BackendRegistry<PlayerctlSharedKey, Broadcaster<BackendUpdate>>
+{
+    static REGISTRY: OnceLock<BackendRegistry<PlayerctlSharedKey, Broadcaster<BackendUpdate>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
+
+fn subscribe_shared_playerctl(player: Option<String>) -> std::sync::mpsc::Receiver<BackendUpdate> {
+    let key = PlayerctlSharedKey {
+        player: player.clone(),
+    };
+
+    let (broadcaster, start_worker) =
+        playerctl_registry().get_or_create(key.clone(), Broadcaster::new);
+    let receiver = broadcaster.subscribe();
+
+    if start_worker {
+        start_playerctl_worker(key, broadcaster, player);
+    }
+
+    receiver
+}
+
+fn start_playerctl_worker(
+    key: PlayerctlSharedKey,
+    broadcaster: Arc<Broadcaster<BackendUpdate>>,
+    player: Option<String>,
+) {
+    std::thread::spawn(move || {
+        run_event_backend(&broadcaster, player);
+        playerctl_registry().remove(&key, &broadcaster);
+    });
 }
 
 fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
@@ -111,11 +151,7 @@ fn build_playerctl_module(config: PlayerctlViewConfig) -> Overlay {
         );
     }
 
-    let (sender, receiver) = mpsc::channel::<BackendUpdate>();
-    std::thread::spawn({
-        let player = config.player.clone();
-        move || run_event_backend(sender, player)
-    });
+    let receiver = subscribe_shared_playerctl(config.player.clone());
 
     let root_weak = root.downgrade();
     gtk::glib::timeout_add_local(Duration::from_millis(200), {
