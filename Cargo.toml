@@ -5,8 +5,6 @@ edition = "2021"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-gio = "0.22"
-glib = "0.22"
 gtk = { package = "gtk4", version = ">=0.10, <0.12" }
 gtk4-layer-shell = ">=0.7, <0.9"
 json5 = "1.3"
