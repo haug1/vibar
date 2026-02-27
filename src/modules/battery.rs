@@ -529,30 +529,17 @@ fn read_trimmed_or_default(path: &Path, default: &str) -> String {
 }
 
 fn render_format(format: &str, snapshot: &BatterySnapshot, format_icons: &[String]) -> String {
-    let icon = icon_for_capacity(format_icons, snapshot.capacity);
+    let icon = super::icon_for_percentage(format_icons, snapshot.capacity);
     render_markup_template(
         format,
         &[
             ("{capacity}", &snapshot.capacity.to_string()),
             ("{percent}", &snapshot.capacity.to_string()),
             ("{status}", &snapshot.status),
-            ("{icon}", &icon),
+            ("{icon}", icon),
             ("{device}", &snapshot.device_name),
         ],
     )
-}
-
-fn icon_for_capacity(format_icons: &[String], capacity: u8) -> String {
-    if format_icons.is_empty() {
-        return String::new();
-    }
-    if format_icons.len() == 1 {
-        return format_icons[0].clone();
-    }
-
-    let clamped = capacity.min(100) as usize;
-    let index = (clamped * (format_icons.len() - 1)) / 100;
-    format_icons[index].clone()
 }
 
 fn battery_level_css_class(capacity: u8) -> &'static str {
@@ -681,10 +668,11 @@ mod tests {
 
     #[test]
     fn icon_for_capacity_maps_full_range() {
+        use crate::modules::icon_for_percentage;
         let icons = vec!["low".to_string(), "mid".to_string(), "high".to_string()];
-        assert_eq!(icon_for_capacity(&icons, 0), "low");
-        assert_eq!(icon_for_capacity(&icons, 50), "mid");
-        assert_eq!(icon_for_capacity(&icons, 100), "high");
+        assert_eq!(icon_for_percentage(&icons, 0), "low");
+        assert_eq!(icon_for_percentage(&icons, 50), "mid");
+        assert_eq!(icon_for_percentage(&icons, 100), "high");
     }
 
     #[test]

@@ -724,12 +724,12 @@ fn select_best_device<'a>(
 }
 
 fn render_format(format: &str, snapshot: &BacklightSnapshot, format_icons: &[String]) -> String {
-    let icon = icon_for_percent(format_icons, snapshot.percent);
+    let icon = super::icon_for_percentage(format_icons, snapshot.percent.min(100) as u8);
     render_markup_template(
         format,
         &[
             ("{percent}", &snapshot.percent.to_string()),
-            ("{icon}", &icon),
+            ("{icon}", icon),
             (
                 "{brightness}",
                 &snapshot.device.actual_brightness.to_string(),
@@ -738,19 +738,6 @@ fn render_format(format: &str, snapshot: &BacklightSnapshot, format_icons: &[Str
             ("{device}", &snapshot.device.name),
         ],
     )
-}
-
-fn icon_for_percent(format_icons: &[String], percent: u16) -> String {
-    if format_icons.is_empty() {
-        return String::new();
-    }
-    if format_icons.len() == 1 {
-        return format_icons[0].clone();
-    }
-
-    let clamped = percent.min(100) as usize;
-    let index = (clamped * (format_icons.len() - 1)) / 100;
-    format_icons[index].clone()
 }
 
 fn brightness_css_class(percent: u16) -> &'static str {
@@ -835,10 +822,11 @@ mod tests {
 
     #[test]
     fn icon_for_percent_maps_full_range() {
+        use crate::modules::icon_for_percentage;
         let icons = vec!["low".to_string(), "mid".to_string(), "high".to_string()];
-        assert_eq!(icon_for_percent(&icons, 0), "low");
-        assert_eq!(icon_for_percent(&icons, 50), "mid");
-        assert_eq!(icon_for_percent(&icons, 100), "high");
+        assert_eq!(icon_for_percentage(&icons, 0), "low");
+        assert_eq!(icon_for_percentage(&icons, 50), "mid");
+        assert_eq!(icon_for_percentage(&icons, 100), "high");
     }
 
     #[test]
