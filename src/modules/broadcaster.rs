@@ -156,22 +156,46 @@ pub(crate) fn attach_subscription<W, U>(
     W: gtk::prelude::IsA<gtk::Widget> + Clone + 'static,
     U: 'static,
 {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     let widget_weak = widget.downgrade();
     let fd = subscription.notify_fd;
-    // We move the whole Subscription into the closure so its Drop fires
-    // when the source is removed (closing the read fd).
-    glib::unix_fd_add_local(fd, IOCondition::IN, move |_, _| {
+
+    // Wrap subscription in Rc<RefCell> so the destroy handler can also drop
+    // it.  This ensures cleanup even if no broadcast arrives after the
+    // widget is destroyed.
+    let sub_cell = Rc::new(RefCell::new(Some(subscription)));
+    let sub_cell_for_destroy = Rc::clone(&sub_cell);
+
+    let source_id_cell: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let source_id_for_destroy = Rc::clone(&source_id_cell);
+
+    let source_id = glib::unix_fd_add_local(fd, IOCondition::IN, move |_, _| {
         drain_pipe(fd);
         let Some(widget) = widget_weak.upgrade() else {
             // Widget gone — drop subscription, closing the pipe and
             // letting the broadcaster prune on next broadcast.
-            let _ = &subscription;
+            sub_cell.borrow_mut().take();
             return glib::ControlFlow::Break;
         };
-        while let Ok(update) = subscription.receiver.try_recv() {
-            apply_fn(&widget, update);
+        if let Some(sub) = sub_cell.borrow().as_ref() {
+            while let Ok(update) = sub.receiver.try_recv() {
+                apply_fn(&widget, update);
+            }
         }
         glib::ControlFlow::Continue
+    });
+
+    *source_id_cell.borrow_mut() = Some(source_id);
+
+    widget.connect_destroy(move |_| {
+        // Drop the subscription immediately, closing the pipe read-end.
+        sub_cell_for_destroy.borrow_mut().take();
+        // Remove the fd source so the closure is dropped too.
+        if let Some(id) = source_id_for_destroy.borrow_mut().take() {
+            id.remove();
+        }
     });
 }
 
