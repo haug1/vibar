@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use gtk::glib::ControlFlow;
@@ -21,6 +21,7 @@ use pulse::volume::Volume;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::modules::broadcaster::{BackendRegistry, Broadcaster};
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, attach_secondary_click_command,
     escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig,
@@ -217,9 +218,71 @@ enum WorkerCommand {
     },
 }
 
+#[derive(Clone)]
 enum UiUpdate {
     Label(String),
     Controls(AudioControlsState),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PulseSharedKey {}
+
+struct SharedPulseState {
+    broadcaster: Broadcaster<UiUpdate>,
+    control_tx: Mutex<Sender<WorkerCommand>>,
+    control_rx: Mutex<Option<Receiver<WorkerCommand>>>,
+}
+
+fn pulse_registry() -> &'static BackendRegistry<PulseSharedKey, SharedPulseState> {
+    static REGISTRY: OnceLock<BackendRegistry<PulseSharedKey, SharedPulseState>> = OnceLock::new();
+    REGISTRY.get_or_init(BackendRegistry::new)
+}
+
+fn subscribe_shared_pulse(
+    config: &PulseAudioConfig,
+) -> (std::sync::mpsc::Receiver<UiUpdate>, Sender<WorkerCommand>) {
+    let key = PulseSharedKey {};
+
+    let render_config = config.clone();
+    let (shared, start_worker) = pulse_registry().get_or_create(key.clone(), || {
+        let (control_tx, control_rx) = mpsc::channel();
+        SharedPulseState {
+            broadcaster: Broadcaster::new(),
+            control_tx: Mutex::new(control_tx),
+            control_rx: Mutex::new(Some(control_rx)),
+        }
+    });
+
+    let ui_rx = shared.broadcaster.subscribe();
+    let control_tx = shared
+        .control_tx
+        .lock()
+        .expect("pulse control_tx mutex poisoned")
+        .clone();
+
+    if start_worker {
+        let control_rx = shared
+            .control_rx
+            .lock()
+            .expect("pulse control_rx mutex poisoned")
+            .take()
+            .expect("control_rx should be present on first create");
+        start_pulse_worker(key, shared, control_rx, render_config);
+    }
+
+    (ui_rx, control_tx)
+}
+
+fn start_pulse_worker(
+    key: PulseSharedKey,
+    shared: Arc<SharedPulseState>,
+    control_rx: Receiver<WorkerCommand>,
+    config: PulseAudioConfig,
+) {
+    std::thread::spawn(move || {
+        run_native_loop(&shared.broadcaster, control_rx, config);
+        pulse_registry().remove(&key, &shared);
+    });
 }
 
 #[derive(Clone)]
@@ -305,7 +368,8 @@ fn build_pulseaudio_module(
 
     apply_css_classes(&label, config.class.as_deref());
 
-    let (worker_tx, worker_rx) = mpsc::channel::<WorkerCommand>();
+    let (ui_receiver, worker_tx) = subscribe_shared_pulse(&config);
+
     let controls_ui = if config.controls.enabled {
         let controls_ui = build_controls_ui(&label, worker_tx.clone(), config.controls.open);
         if matches!(config.controls.open, PulseAudioControlsOpenMode::LeftClick)
@@ -340,17 +404,17 @@ fn build_pulseaudio_module(
         let scroll = EventControllerScroll::new(
             EventControllerScrollFlags::VERTICAL | EventControllerScrollFlags::DISCRETE,
         );
-        let worker_tx = worker_tx.clone();
+        let scroll_tx = worker_tx.clone();
         scroll.connect_scroll(move |_, _, dy| {
             if dy < 0.0 {
-                let _ = worker_tx.send(WorkerCommand::VolumeStep {
+                let _ = scroll_tx.send(WorkerCommand::VolumeStep {
                     increase: true,
                     step: scroll_step,
                 });
                 return gtk::glib::Propagation::Stop;
             }
             if dy > 0.0 {
-                let _ = worker_tx.send(WorkerCommand::VolumeStep {
+                let _ = scroll_tx.send(WorkerCommand::VolumeStep {
                     increase: false,
                     step: scroll_step,
                 });
@@ -360,10 +424,6 @@ fn build_pulseaudio_module(
         });
         label.add_controller(scroll);
     }
-
-    let (ui_sender, ui_receiver) = mpsc::channel::<UiUpdate>();
-    let render_config = config.clone();
-    std::thread::spawn(move || run_native_loop(ui_sender, worker_rx, render_config));
 
     let label_weak = label.downgrade();
     gtk::glib::timeout_add_local(Duration::from_millis(UI_DRAIN_INTERVAL_MILLIS), {
@@ -686,15 +746,18 @@ pub(crate) fn normalized_scroll_step(step: f64) -> f64 {
 }
 
 fn run_native_loop(
-    ui_sender: mpsc::Sender<UiUpdate>,
+    broadcaster: &Broadcaster<UiUpdate>,
     worker_rx: Receiver<WorkerCommand>,
     config: PulseAudioConfig,
 ) {
     loop {
-        match run_native_session(&ui_sender, &worker_rx, &config) {
+        if broadcaster.subscriber_count() == 0 {
+            return;
+        }
+        match run_native_session(broadcaster, &worker_rx, &config) {
             Ok(()) => return,
             Err(err) => {
-                let _ = ui_sender.send(UiUpdate::Label(escape_markup_text(&format!(
+                broadcaster.broadcast(UiUpdate::Label(escape_markup_text(&format!(
                     "audio error: {err}"
                 ))));
                 std::thread::sleep(Duration::from_secs(SESSION_RECONNECT_DELAY_SECS));
@@ -704,7 +767,7 @@ fn run_native_loop(
 }
 
 fn run_native_session(
-    ui_sender: &mpsc::Sender<UiUpdate>,
+    broadcaster: &Broadcaster<UiUpdate>,
     worker_rx: &Receiver<WorkerCommand>,
     config: &PulseAudioConfig,
 ) -> Result<(), String> {
@@ -799,7 +862,10 @@ fn run_native_session(
                     dirty.store(true, Ordering::SeqCst);
                 }
                 Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return Ok(()),
+                Err(TryRecvError::Disconnected) => {
+                    // Control channel disconnected; all UI senders gone
+                    return Ok(());
+                }
             }
         }
 
@@ -807,11 +873,11 @@ fn run_native_session(
             match query_current_state(&context, &mut mainloop) {
                 Ok((state, defaults, controls_state)) => {
                     last_defaults = Some(defaults);
-                    let _ = ui_sender.send(UiUpdate::Label(render_format(config, &state)));
-                    let _ = ui_sender.send(UiUpdate::Controls(controls_state));
+                    broadcaster.broadcast(UiUpdate::Label(render_format(config, &state)));
+                    broadcaster.broadcast(UiUpdate::Controls(controls_state));
                 }
                 Err(err) => {
-                    let _ = ui_sender.send(UiUpdate::Label(escape_markup_text(&format!(
+                    broadcaster.broadcast(UiUpdate::Label(escape_markup_text(&format!(
                         "audio error: {err}"
                     ))));
                 }
@@ -838,6 +904,10 @@ fn run_native_session(
         }
 
         std::thread::sleep(Duration::from_millis(MAINLOOP_IDLE_SLEEP_MILLIS));
+
+        if broadcaster.subscriber_count() == 0 {
+            return Ok(());
+        }
     }
 }
 
