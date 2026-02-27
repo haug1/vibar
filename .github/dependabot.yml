@@ -17,8 +17,6 @@ updates:
         patterns:
           - "gtk4"
           - "gtk4-layer-shell"
-          - "glib"
-          - "gio"
 
   - package-ecosystem: github-actions
     directory: "/"
