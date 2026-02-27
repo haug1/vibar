@@ -88,25 +88,9 @@ make ci
 - Bottom-anchored layer-shell bar
 - One bar window per connected monitor, with hotplug add/remove sync
 - Configurable horizontal layout with `left`, `center`, `right` areas
-- Configurable module system (`docs/modules.md`)
-- Sway modules for workspaces, active mode, and active-window title (`sway/workspaces`, `sway/mode`, `sway/window`)
-- Workspace module supports container and per-workspace-button CSS class overrides
-- Playerctl supports `max-width` display mode for adaptive title width
-- Playerctl shows a truncation cue when text is clipped
-- Playerctl hover tooltip appears only when text is clipped
-- Backlight module with Waybar-style `format-icons`, optional `device` selection, and event-driven `/sys/class/backlight` updates via udev
-- Backlight module supports scroll brightness control (default logind DBus path or custom scroll commands)
-- Battery module with `/sys/class/power_supply` auto-discovery, `format-icons`, and dynamic level/status CSS classes
-- Temperature module with Linux sensor path/thermal-zone sources, threshold states, and Waybar-style placeholders
-- PulseAudio module supports optional popup controls for default sink mute/volume, active app stream volume/mute, and output-port switching, plus separate left/right click commands
-- Tray module uses event-driven StatusNotifier updates with debounced refreshes and widget reuse to reduce CPU/DBus overhead
-- Config file search order:
-  - `~/.config/vibar/config.jsonc`
-  - embedded `config.jsonc` bundled in binary (final fallback)
-- CSS layering support:
-  - embedded default `style.css`
-  - optional user CSS loaded on top
-  - default CSS can be disabled via `style.load-default`
+- Module types: `sway/workspaces`, `sway/mode`, `sway/window`, `clock`, `cpu`, `memory`, `disk`, `temperature`, `backlight`, `battery`, `playerctl`, `pulseaudio`, `tray`, `exec`, `group` — see [`docs/modules.md`](./docs/modules.md) for full config/behavior/styling reference
+- Config file search order: `~/.config/vibar/config.jsonc`, then embedded fallback
+- CSS layering: embedded default `style.css` + optional user CSS overlay (disable default via `style.load-default`)
 
 # Preview bar config
 
