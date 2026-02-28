@@ -28,9 +28,7 @@ use crate::modules::{
 
 use super::ModuleFactory;
 
-#[path = "pulseaudio/config.rs"]
 mod config;
-#[path = "pulseaudio/format.rs"]
 mod format;
 
 use self::config::{
