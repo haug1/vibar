@@ -18,7 +18,10 @@ use modules::{ModuleBuildContext, ModuleConfig};
 const APP_ID: &str = "dev.haug1.vibar";
 
 fn main() {
-    let app = Application::builder().application_id(APP_ID).build();
+    let app = Application::builder()
+        .application_id(APP_ID)
+        .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
 
     app.connect_activate(|app| {
         let loaded_config = load_config();
