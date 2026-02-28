@@ -95,13 +95,10 @@ fn attach_click_command(widget: &impl IsA<Widget>, button: u32, command: Option<
 
     let click = GestureClick::builder().button(button).build();
     click.connect_pressed(move |_, _, _, _| {
-        let command = command.clone();
-        std::thread::spawn(move || {
-            let _ = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(command)
-                .spawn();
-        });
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(command.as_str())
+            .spawn();
     });
     widget.add_controller(click);
 }
