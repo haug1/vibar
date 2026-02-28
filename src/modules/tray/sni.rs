@@ -1,7 +1,10 @@
 use std::collections::HashMap;
+use std::env;
+use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
 
 use zbus::blocking::connection::Builder as ConnectionBuilder;
 use zbus::blocking::fdo::DBusProxy;
@@ -92,11 +95,17 @@ impl LocalStatusNotifierWatcher {
     }
 }
 
-static LOCAL_WATCHER_INIT: OnceLock<()> = OnceLock::new();
+struct LocalWatcherRuntime {
+    _connection: Connection,
+    _lock_file: File,
+}
+
+static LOCAL_WATCHER_RUNTIME: OnceLock<Mutex<Option<LocalWatcherRuntime>>> = OnceLock::new();
 const DBUS_PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
 const WATCHER_ITEM_REGISTERED_SIGNAL: &str = "StatusNotifierItemRegistered";
 const WATCHER_ITEM_UNREGISTERED_SIGNAL: &str = "StatusNotifierItemUnregistered";
 const PROPERTIES_CHANGED_SIGNAL: &str = "PropertiesChanged";
+const WATCHER_LOCK_FILENAME: &str = "vibar-status-notifier-watcher.lock";
 
 pub(super) fn activate_item(destination: String, path: String, x: i32, y: i32) {
     call_item_method(destination, path, "Activate", x, y);
@@ -550,38 +559,71 @@ fn tray_debug_enabled() -> bool {
 }
 
 fn ensure_local_watcher_fallback() {
-    let _ = LOCAL_WATCHER_INIT.get_or_init(|| {
-        let state = Arc::new(Mutex::new(WatcherState::default()));
-        spawn_owner_cleanup_listener(state.clone());
+    let runtime = LOCAL_WATCHER_RUNTIME.get_or_init(|| Mutex::new(None));
+    let Ok(mut runtime_guard) = runtime.lock() else {
+        return;
+    };
+    if runtime_guard.is_some() {
+        return;
+    }
 
-        thread::spawn(move || {
-            let watcher = LocalStatusNotifierWatcher { state };
+    let Some(lock_file) = try_acquire_watcher_lock() else {
+        return;
+    };
 
-            let connection = match ConnectionBuilder::session()
-                .and_then(|builder| builder.name(WATCHER_DESTINATION))
-                .and_then(|builder| builder.serve_at(WATCHER_PATH, watcher))
-                .and_then(|builder| builder.build())
-            {
-                Ok(connection) => {
-                    if tray_debug_enabled() {
-                        eprintln!("vibar/tray: started local StatusNotifierWatcher fallback");
-                    }
-                    connection
-                }
-                Err(err) => {
-                    if tray_debug_enabled() {
-                        eprintln!("vibar/tray: local watcher fallback unavailable: {err}");
-                    }
-                    return;
-                }
-            };
+    let state = Arc::new(Mutex::new(WatcherState::default()));
 
-            let _keep_connection_alive = connection;
-            loop {
-                thread::sleep(Duration::from_secs(3600));
+    let watcher = LocalStatusNotifierWatcher {
+        state: state.clone(),
+    };
+    let connection = match ConnectionBuilder::session()
+        .and_then(|builder| builder.name(WATCHER_DESTINATION))
+        .and_then(|builder| builder.serve_at(WATCHER_PATH, watcher))
+        .and_then(|builder| builder.build())
+    {
+        Ok(connection) => connection,
+        Err(err) => {
+            if tray_debug_enabled() {
+                eprintln!("vibar/tray: local watcher fallback unavailable: {err}");
             }
-        });
+            return;
+        }
+    };
+
+    spawn_owner_cleanup_listener(state);
+    if tray_debug_enabled() {
+        eprintln!("vibar/tray: started local StatusNotifierWatcher fallback");
+    }
+    *runtime_guard = Some(LocalWatcherRuntime {
+        _connection: connection,
+        _lock_file: lock_file,
     });
+}
+
+fn try_acquire_watcher_lock() -> Option<File> {
+    let lock_path = watcher_lock_path();
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)
+        .ok()?;
+
+    let fd = file.as_raw_fd();
+    // Prevent multiple vibar processes from running the local watcher fallback.
+    let result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if result == 0 {
+        Some(file)
+    } else {
+        None
+    }
+}
+
+fn watcher_lock_path() -> PathBuf {
+    if let Ok(runtime_dir) = env::var("XDG_RUNTIME_DIR") {
+        return PathBuf::from(runtime_dir).join(WATCHER_LOCK_FILENAME);
+    }
+    env::temp_dir().join(WATCHER_LOCK_FILENAME)
 }
 
 fn spawn_owner_cleanup_listener(state: Arc<Mutex<WatcherState>>) {
