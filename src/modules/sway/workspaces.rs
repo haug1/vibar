@@ -144,11 +144,12 @@ fn query_workspaces() -> WorkspacesUpdate {
         .find(|ws| ws.focused)
         .map(|ws| ws.name.clone());
 
-    let focused_from_tree = snapshot
-        .tree
-        .as_ref()
-        .and_then(focused_workspace_name_from_tree);
-    let focused_workspace = focused_from_tree.or(focused_from_list);
+    let focused_workspace = focused_from_list.or_else(|| {
+        snapshot
+            .tree
+            .as_ref()
+            .and_then(focused_workspace_name_from_tree)
+    });
 
     let infos = workspaces
         .iter()
