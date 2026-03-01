@@ -9,7 +9,7 @@ use swayipc::{EventType, Node, NodeType};
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
-use crate::modules::sway::ipc::{query_with_connection, run_event_loop};
+use crate::modules::sway::ipc::{query_with_connection, subscribe_shared_events};
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
     ModuleBuildContext, ModuleConfig, ModuleFactory,
@@ -103,19 +103,23 @@ fn subscribe_shared_window(format: String) -> Subscription<WindowUpdate> {
 fn start_window_worker(key: WindowSharedKey, broadcaster: Arc<Broadcaster<WindowUpdate>>) {
     std::thread::spawn(move || {
         broadcaster.broadcast(query_focused_window(&key.format));
+        let events = subscribe_shared_events();
 
-        run_event_loop(
-            "window",
-            &[EventType::Window, EventType::Workspace, EventType::Output],
-            || {
-                if broadcaster.subscriber_count() == 0 {
-                    window_registry().remove(&key, &broadcaster);
-                    return true;
+        loop {
+            if broadcaster.subscriber_count() == 0 {
+                window_registry().remove(&key, &broadcaster);
+                return;
+            }
+
+            match events.recv_timeout(std::time::Duration::from_millis(500)) {
+                Ok(EventType::Window | EventType::Workspace | EventType::Output) => {
+                    broadcaster.broadcast(query_focused_window(&key.format));
                 }
-                false
-            },
-            || broadcaster.broadcast(query_focused_window(&key.format)),
-        );
+                Ok(_) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        }
     });
 }
 

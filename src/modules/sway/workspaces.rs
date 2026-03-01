@@ -12,7 +12,7 @@ use swayipc::EventType;
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
-use crate::modules::sway::ipc::{query_with_connection, run_event_loop};
+use crate::modules::sway::ipc::{query_with_connection, subscribe_shared_events};
 use crate::modules::{apply_css_classes, ModuleBuildContext, ModuleConfig, ModuleFactory};
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -106,19 +106,23 @@ fn start_workspaces_worker(
 ) {
     std::thread::spawn(move || {
         broadcaster.broadcast(query_workspaces());
+        let events = subscribe_shared_events();
 
-        run_event_loop(
-            "workspaces",
-            &[EventType::Workspace, EventType::Output],
-            || {
-                if broadcaster.subscriber_count() == 0 {
-                    workspaces_registry().remove(&key, &broadcaster);
-                    return true;
+        loop {
+            if broadcaster.subscriber_count() == 0 {
+                workspaces_registry().remove(&key, &broadcaster);
+                return;
+            }
+
+            match events.recv_timeout(std::time::Duration::from_millis(500)) {
+                Ok(EventType::Workspace | EventType::Output) => {
+                    broadcaster.broadcast(query_workspaces());
                 }
-                false
-            },
-            || broadcaster.broadcast(query_workspaces()),
-        );
+                Ok(_) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        }
     });
 }
 
