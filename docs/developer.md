@@ -17,7 +17,7 @@ Module behavior, config fields, and styling selectors are documented in `docs/mo
 ### Implementation Details
 
 - `playerctl` layout: `src/modules/playerctl/mod.rs` (orchestration), `config.rs` (schema/defaults), `backend.rs` (MPRIS DBus via `zbus`), `model.rs` (pure metadata/format helpers), `ui.rs` (GTK tooltip/carousel/controls UI wiring).
-- `pulseaudio` (`src/modules/pulseaudio.rs`) uses native `libpulse` subscriptions/introspection rather than shelling out to `pactl`.
+- `pulseaudio` layout: `src/modules/pulseaudio/mod.rs` (factory/orchestration + render glue), `config.rs` (schema/defaults), `format.rs` (icon selection helpers), `backend.rs` (native `libpulse` session/query/mutator loop), `ui.rs` (GTK controls popover/widget refresh logic).
 - `backlight` and `battery` use `udev` callbacks as primary update trigger with immediate GTK main-thread dispatch.
 
 ## Adding A Module
