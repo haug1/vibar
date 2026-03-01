@@ -4,11 +4,12 @@ use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
-use swayipc::{Connection, EventType, Node, NodeType};
+use swayipc::{EventType, Node, NodeType};
 
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
+use crate::modules::sway::ipc::{query_with_connection, run_event_loop};
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
     ModuleBuildContext, ModuleConfig, ModuleFactory,
@@ -103,60 +104,25 @@ fn start_window_worker(key: WindowSharedKey, broadcaster: Arc<Broadcaster<Window
     std::thread::spawn(move || {
         broadcaster.broadcast(query_focused_window(&key.format));
 
-        loop {
-            if broadcaster.subscriber_count() == 0 {
-                window_registry().remove(&key, &broadcaster);
-                return;
-            }
-
-            let connection = match Connection::new() {
-                Ok(conn) => conn,
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    continue;
-                }
-            };
-
-            let stream = match connection.subscribe([
-                EventType::Window,
-                EventType::Workspace,
-                EventType::Output,
-            ]) {
-                Ok(stream) => stream,
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    continue;
-                }
-            };
-
-            for _ in stream {
+        run_event_loop(
+            "window",
+            &[EventType::Window, EventType::Workspace, EventType::Output],
+            || {
                 if broadcaster.subscriber_count() == 0 {
                     window_registry().remove(&key, &broadcaster);
-                    return;
+                    return true;
                 }
-                broadcaster.broadcast(query_focused_window(&key.format));
-            }
-
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
+                false
+            },
+            || broadcaster.broadcast(query_focused_window(&key.format)),
+        );
     });
 }
 
 fn query_focused_window(format: &str) -> WindowUpdate {
-    let mut connection = match Connection::new() {
-        Ok(conn) => conn,
-        Err(_) => {
-            return WindowUpdate {
-                title: escape_markup_text("sway?"),
-                output: None,
-                visible: true,
-            };
-        }
-    };
-
-    let tree = match connection.get_tree() {
-        Ok(tree) => tree,
-        Err(_) => {
+    let tree = match query_with_connection("window", "tree query", |conn| conn.get_tree()) {
+        Some(tree) => tree,
+        None => {
             return WindowUpdate {
                 title: escape_markup_text("sway?"),
                 output: None,
