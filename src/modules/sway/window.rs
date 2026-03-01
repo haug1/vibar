@@ -9,7 +9,9 @@ use swayipc::{EventType, Node, NodeType};
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
-use crate::modules::sway::ipc::{query_with_connection, subscribe_shared_events};
+use crate::modules::sway::ipc::{
+    query_snapshot, recv_relevant_event_coalesced, subscribe_shared_events,
+};
 use crate::modules::{
     apply_css_classes, attach_primary_click_command, escape_markup_text, render_markup_template,
     ModuleBuildContext, ModuleConfig, ModuleFactory,
@@ -111,20 +113,24 @@ fn start_window_worker(key: WindowSharedKey, broadcaster: Arc<Broadcaster<Window
                 return;
             }
 
-            match events.recv_timeout(std::time::Duration::from_millis(500)) {
-                Ok(EventType::Window | EventType::Workspace | EventType::Output) => {
+            match recv_relevant_event_coalesced(
+                &events,
+                &[EventType::Window, EventType::Workspace, EventType::Output],
+            ) {
+                Ok(true) => {
                     broadcaster.broadcast(query_focused_window(&key.format));
                 }
-                Ok(_) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Ok(false) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
     });
 }
 
 fn query_focused_window(format: &str) -> WindowUpdate {
-    let tree = match query_with_connection("window", "tree query", |conn| conn.get_tree()) {
+    let snapshot = query_snapshot();
+    let tree = match snapshot.tree.as_ref() {
         Some(tree) => tree,
         None => {
             return WindowUpdate {
@@ -135,7 +141,7 @@ fn query_focused_window(format: &str) -> WindowUpdate {
         }
     };
 
-    let focused = focused_window_info(&tree);
+    let focused = focused_window_info(tree);
     let output = focused.as_ref().and_then(|info| info.output.clone());
     let title = focused.and_then(|info| info.title).unwrap_or_default();
 

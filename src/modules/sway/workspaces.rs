@@ -12,7 +12,9 @@ use swayipc::EventType;
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
-use crate::modules::sway::ipc::{query_with_connection, subscribe_shared_events};
+use crate::modules::sway::ipc::{
+    query_snapshot, recv_relevant_event_coalesced, subscribe_shared_events,
+};
 use crate::modules::{apply_css_classes, ModuleBuildContext, ModuleConfig, ModuleFactory};
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -114,50 +116,54 @@ fn start_workspaces_worker(
                 return;
             }
 
-            match events.recv_timeout(std::time::Duration::from_millis(500)) {
-                Ok(EventType::Workspace | EventType::Output) => {
+            match recv_relevant_event_coalesced(&events, &[EventType::Workspace, EventType::Output])
+            {
+                Ok(true) => {
                     broadcaster.broadcast(query_workspaces());
                 }
-                Ok(_) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Ok(false) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
     });
 }
 
 fn query_workspaces() -> WorkspacesUpdate {
-    query_with_connection("workspaces", "workspace query", |connection| {
-        let workspaces = connection.get_workspaces()?;
+    let snapshot = query_snapshot();
+    let Some(workspaces) = snapshot.workspaces.as_ref() else {
+        return WorkspacesUpdate {
+            workspaces: Vec::new(),
+            focused_workspace: None,
+        };
+    };
 
-        let focused_from_list = workspaces
-            .iter()
-            .find(|ws| ws.focused)
-            .map(|ws| ws.name.clone());
+    let focused_from_list = workspaces
+        .iter()
+        .find(|ws| ws.focused)
+        .map(|ws| ws.name.clone());
 
-        let focused_from_tree = focused_workspace_name_from_tree(connection);
-        let focused_workspace = focused_from_tree.or(focused_from_list);
+    let focused_from_tree = snapshot
+        .tree
+        .as_ref()
+        .and_then(focused_workspace_name_from_tree);
+    let focused_workspace = focused_from_tree.or(focused_from_list);
 
-        let infos = workspaces
-            .into_iter()
-            .map(|ws| WorkspaceInfo {
-                name: ws.name,
-                num: ws.num,
-                output: ws.output,
-                focused: ws.focused,
-                visible: ws.visible,
-            })
-            .collect();
-
-        Ok(WorkspacesUpdate {
-            workspaces: infos,
-            focused_workspace,
+    let infos = workspaces
+        .iter()
+        .map(|ws| WorkspaceInfo {
+            name: ws.name.clone(),
+            num: ws.num,
+            output: ws.output.clone(),
+            focused: ws.focused,
+            visible: ws.visible,
         })
-    })
-    .unwrap_or(WorkspacesUpdate {
-        workspaces: Vec::new(),
-        focused_workspace: None,
-    })
+        .collect();
+
+    WorkspacesUpdate {
+        workspaces: infos,
+        focused_workspace,
+    }
 }
 
 pub(crate) fn build_workspaces_module(
@@ -309,9 +315,8 @@ fn render_workspaces(
     }
 }
 
-fn focused_workspace_name_from_tree(connection: &mut swayipc::Connection) -> Option<String> {
-    let tree = connection.get_tree().ok()?;
-    focused_workspace_name_in_node(&tree)
+fn focused_workspace_name_from_tree(tree: &swayipc::Node) -> Option<String> {
+    focused_workspace_name_in_node(tree)
 }
 
 fn focused_workspace_name_in_node(node: &swayipc::Node) -> Option<String> {

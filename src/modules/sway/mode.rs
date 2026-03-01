@@ -9,7 +9,9 @@ use swayipc::EventType;
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
-use crate::modules::sway::ipc::{query_with_connection, subscribe_shared_events};
+use crate::modules::sway::ipc::{
+    query_snapshot, recv_relevant_event_coalesced, subscribe_shared_events,
+};
 use crate::modules::{
     escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleFactory,
     ModuleLabel,
@@ -104,22 +106,21 @@ fn start_mode_worker(key: ModeSharedKey, broadcaster: Arc<Broadcaster<ModeUpdate
                 return;
             }
 
-            match events.recv_timeout(std::time::Duration::from_millis(500)) {
-                Ok(EventType::Mode) => {
+            match recv_relevant_event_coalesced(&events, &[EventType::Mode]) {
+                Ok(true) => {
                     broadcaster.broadcast(query_current_mode(&key.format));
                 }
-                Ok(_) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Ok(false) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
     });
 }
 
 fn query_current_mode(format: &str) -> ModeUpdate {
-    let mode = match query_with_connection("mode", "binding state query", |conn| {
-        conn.get_binding_state()
-    }) {
+    let snapshot = query_snapshot();
+    let mode = match snapshot.mode.as_deref() {
         Some(mode) => mode,
         None => {
             return ModeUpdate {
@@ -136,7 +137,7 @@ fn query_current_mode(format: &str) -> ModeUpdate {
         };
     }
 
-    let rendered = render_markup_template(format, &[("{}", &mode)]);
+    let rendered = render_markup_template(format, &[("{}", mode)]);
     ModeUpdate {
         visible: !rendered.trim().is_empty(),
         text: rendered,
