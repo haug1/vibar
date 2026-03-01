@@ -7,11 +7,12 @@ use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, Label, Orientation, Widget};
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use swayipc::{Connection, EventType};
+use swayipc::EventType;
 
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
+use crate::modules::sway::ipc::{query_with_connection, run_event_loop};
 use crate::modules::{apply_css_classes, ModuleBuildContext, ModuleConfig, ModuleFactory};
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -106,97 +107,53 @@ fn start_workspaces_worker(
     std::thread::spawn(move || {
         broadcaster.broadcast(query_workspaces());
 
-        loop {
-            if broadcaster.subscriber_count() == 0 {
-                workspaces_registry().remove(&key, &broadcaster);
-                return;
-            }
-
-            let connection = match Connection::new() {
-                Ok(conn) => conn,
-                Err(err) => {
-                    if workspace_debug_enabled() {
-                        eprintln!("vibar/workspaces: failed to connect for events: {err}");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    continue;
-                }
-            };
-
-            let stream = match connection.subscribe([EventType::Workspace, EventType::Output]) {
-                Ok(stream) => stream,
-                Err(err) => {
-                    if workspace_debug_enabled() {
-                        eprintln!("vibar/workspaces: failed to subscribe to events: {err}");
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    continue;
-                }
-            };
-
-            for event in stream {
-                if workspace_debug_enabled() {
-                    eprintln!("vibar/workspaces: event={event:?}");
-                }
+        run_event_loop(
+            "workspaces",
+            &[EventType::Workspace, EventType::Output],
+            || {
                 if broadcaster.subscriber_count() == 0 {
                     workspaces_registry().remove(&key, &broadcaster);
-                    return;
+                    return true;
                 }
-                broadcaster.broadcast(query_workspaces());
-            }
-
-            if workspace_debug_enabled() {
-                eprintln!("vibar/workspaces: event stream ended, reconnecting");
-            }
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
+                false
+            },
+            || broadcaster.broadcast(query_workspaces()),
+        );
     });
 }
 
 fn query_workspaces() -> WorkspacesUpdate {
-    let mut connection = match Connection::new() {
-        Ok(conn) => conn,
-        Err(_) => {
-            return WorkspacesUpdate {
-                workspaces: Vec::new(),
-                focused_workspace: None,
-            };
-        }
-    };
+    query_with_connection("workspaces", "workspace query", |connection| {
+        let workspaces = connection.get_workspaces()?;
 
-    let workspaces = match connection.get_workspaces() {
-        Ok(items) => items,
-        Err(_) => {
-            return WorkspacesUpdate {
-                workspaces: Vec::new(),
-                focused_workspace: None,
-            };
-        }
-    };
+        let focused_from_list = workspaces
+            .iter()
+            .find(|ws| ws.focused)
+            .map(|ws| ws.name.clone());
 
-    let focused_from_list = workspaces
-        .iter()
-        .find(|ws| ws.focused)
-        .map(|ws| ws.name.clone());
+        let focused_from_tree = focused_workspace_name_from_tree(connection);
+        let focused_workspace = focused_from_tree.or(focused_from_list);
 
-    let focused_from_tree = focused_workspace_name_from_tree(&mut connection);
-    let focused_workspace = focused_from_tree.or(focused_from_list);
+        let infos = workspaces
+            .into_iter()
+            .map(|ws| WorkspaceInfo {
+                name: ws.name,
+                num: ws.num,
+                output: ws.output,
+                focused: ws.focused,
+                visible: ws.visible,
+            })
+            .collect();
 
-    let infos = workspaces
-        .into_iter()
-        .map(|ws| WorkspaceInfo {
-            name: ws.name,
-            num: ws.num,
-            output: ws.output,
-            focused: ws.focused,
-            visible: ws.visible,
+        Ok(WorkspacesUpdate {
+            workspaces: infos,
+            focused_workspace,
         })
-        .collect();
-
-    WorkspacesUpdate {
-        workspaces: infos,
-        focused_workspace,
-    }
+    })
+    .unwrap_or(WorkspacesUpdate {
+        workspaces: Vec::new(),
+        focused_workspace: None,
+    })
 }
 
 pub(crate) fn build_workspaces_module(
@@ -348,7 +305,7 @@ fn render_workspaces(
     }
 }
 
-fn focused_workspace_name_from_tree(connection: &mut Connection) -> Option<String> {
+fn focused_workspace_name_from_tree(connection: &mut swayipc::Connection) -> Option<String> {
     let tree = connection.get_tree().ok()?;
     focused_workspace_name_in_node(&tree)
 }

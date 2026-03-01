@@ -4,11 +4,12 @@ use gtk::prelude::*;
 use gtk::{Label, Widget};
 use serde::Deserialize;
 use serde_json::Value;
-use swayipc::{Connection, EventType};
+use swayipc::EventType;
 
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
+use crate::modules::sway::ipc::{query_with_connection, run_event_loop};
 use crate::modules::{
     escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleFactory,
     ModuleLabel,
@@ -96,55 +97,27 @@ fn start_mode_worker(key: ModeSharedKey, broadcaster: Arc<Broadcaster<ModeUpdate
         // Send initial mode state
         broadcaster.broadcast(query_current_mode(&key.format));
 
-        loop {
-            if broadcaster.subscriber_count() == 0 {
-                mode_registry().remove(&key, &broadcaster);
-                return;
-            }
-
-            let connection = match Connection::new() {
-                Ok(conn) => conn,
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    continue;
-                }
-            };
-
-            let stream = match connection.subscribe([EventType::Mode]) {
-                Ok(stream) => stream,
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    continue;
-                }
-            };
-
-            for _ in stream {
+        run_event_loop(
+            "mode",
+            &[EventType::Mode],
+            || {
                 if broadcaster.subscriber_count() == 0 {
                     mode_registry().remove(&key, &broadcaster);
-                    return;
+                    return true;
                 }
-                broadcaster.broadcast(query_current_mode(&key.format));
-            }
-
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
+                false
+            },
+            || broadcaster.broadcast(query_current_mode(&key.format)),
+        );
     });
 }
 
 fn query_current_mode(format: &str) -> ModeUpdate {
-    let mut connection = match Connection::new() {
-        Ok(conn) => conn,
-        Err(_) => {
-            return ModeUpdate {
-                text: escape_markup_text("sway?"),
-                visible: true,
-            };
-        }
-    };
-
-    let mode = match connection.get_binding_state() {
-        Ok(mode) => mode,
-        Err(_) => {
+    let mode = match query_with_connection("mode", "binding state query", |conn| {
+        conn.get_binding_state()
+    }) {
+        Some(mode) => mode,
+        None => {
             return ModeUpdate {
                 text: escape_markup_text("sway?"),
                 visible: true,

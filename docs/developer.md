@@ -16,6 +16,7 @@ Module behavior, config fields, and styling selectors are documented in `docs/mo
 
 ### Implementation Details
 
+- `sway` layout: `src/modules/sway/ipc.rs` (shared reconnect/subscription/query helpers), plus per-module files `workspaces.rs`, `window.rs`, and `mode.rs` for module-specific state rendering.
 - `playerctl` layout: `src/modules/playerctl/mod.rs` (orchestration), `config.rs` (schema/defaults), `backend.rs` (MPRIS DBus via `zbus`), `model.rs` (pure metadata/format helpers), `ui.rs` (GTK tooltip/carousel/controls UI wiring).
 - `pulseaudio` layout: `src/modules/pulseaudio/mod.rs` (factory/orchestration + render glue), `config.rs` (schema/defaults), `format.rs` (icon selection helpers), `backend.rs` (native `libpulse` session/query/mutator loop), `ui.rs` (GTK controls popover/widget refresh logic).
 - `backlight` and `battery` use `udev` callbacks as primary update trigger with immediate GTK main-thread dispatch.
@@ -35,6 +36,7 @@ Module behavior, config fields, and styling selectors are documented in `docs/mo
 Debug environment variables (combine with `cargo run --locked`):
 
 - `VIBAR_DEBUG_WORKSPACES=1` — log sway workspace state each refresh.
+- `VIBAR_DEBUG_SWAY_IPC=1` — log shared sway IPC reconnect/subscribe/event/query errors and stream reconnects.
 - `VIBAR_DEBUG_TRAY=1` — log tray DBus calls, discovery, and errors.
 - `VIBAR_DEBUG_DOM=1` — dump GTK widget tree + CSS classes at startup and periodically. Override interval with `VIBAR_DEBUG_DOM_INTERVAL_SECS=<n>`.
 
