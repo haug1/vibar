@@ -9,7 +9,7 @@ use swayipc::EventType;
 use crate::modules::broadcaster::{
     attach_subscription, BackendRegistry, Broadcaster, Subscription,
 };
-use crate::modules::sway::ipc::{query_with_connection, run_event_loop};
+use crate::modules::sway::ipc::{query_with_connection, subscribe_shared_events};
 use crate::modules::{
     escape_markup_text, render_markup_template, ModuleBuildContext, ModuleConfig, ModuleFactory,
     ModuleLabel,
@@ -96,19 +96,23 @@ fn start_mode_worker(key: ModeSharedKey, broadcaster: Arc<Broadcaster<ModeUpdate
     std::thread::spawn(move || {
         // Send initial mode state
         broadcaster.broadcast(query_current_mode(&key.format));
+        let events = subscribe_shared_events();
 
-        run_event_loop(
-            "mode",
-            &[EventType::Mode],
-            || {
-                if broadcaster.subscriber_count() == 0 {
-                    mode_registry().remove(&key, &broadcaster);
-                    return true;
+        loop {
+            if broadcaster.subscriber_count() == 0 {
+                mode_registry().remove(&key, &broadcaster);
+                return;
+            }
+
+            match events.recv_timeout(std::time::Duration::from_millis(500)) {
+                Ok(EventType::Mode) => {
+                    broadcaster.broadcast(query_current_mode(&key.format));
                 }
-                false
-            },
-            || broadcaster.broadcast(query_current_mode(&key.format)),
-        );
+                Ok(_) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        }
     });
 }
 
