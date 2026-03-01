@@ -154,6 +154,7 @@ Styling:
 - Container classes: `.module.workspaces`
 - Per-workspace button class: `.menu-button`
 - Active state classes: `.menu-button.active`, `.menu-button.workspace-active`
+- Urgent state classes: `.menu-button.urgent`, `.menu-button.workspace-urgent`
 - Optional extra container class via `class` field.
 - Optional extra per-button class via `button-class` field.
 
