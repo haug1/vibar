@@ -38,6 +38,7 @@ struct WorkspaceInfo {
     output: String,
     focused: bool,
     visible: bool,
+    urgent: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -157,6 +158,7 @@ fn query_workspaces() -> WorkspacesUpdate {
             output: ws.output.clone(),
             focused: ws.focused,
             visible: ws.visible,
+            urgent: ws.urgent,
         })
         .collect();
 
@@ -280,8 +282,8 @@ fn render_workspaces(
             workspaces
                 .iter()
                 .map(|ws| format!(
-                    "{{name={},num={},focused={},visible={},output={}}}",
-                    ws.name, ws.num, ws.focused, ws.visible, ws.output
+                    "{{name={},num={},focused={},visible={},urgent={},output={}}}",
+                    ws.name, ws.num, ws.focused, ws.visible, ws.urgent, ws.output
                 ))
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -301,6 +303,10 @@ fn render_workspaces(
         {
             button.add_css_class("active");
             button.add_css_class("workspace-active");
+        }
+        if ws.urgent {
+            button.add_css_class("urgent");
+            button.add_css_class("workspace-urgent");
         }
 
         let ws_name = ws.name.clone();

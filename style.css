@@ -101,6 +101,14 @@
   opacity: 1;
 }
 
+.menu-button.urgent,
+.menu-button.workspace-urgent {
+  background: rgba(255, 96, 96, 0.24);
+  border-color: rgba(255, 128, 128, 0.7);
+  color: #ffeaea;
+  opacity: 1;
+}
+
 .menu-button:focus,
 .menu-button:focus-visible {
   outline: none;
