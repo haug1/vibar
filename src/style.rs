@@ -14,6 +14,7 @@ const USER_STYLE_RELOAD_DEBOUNCE_MILLIS: u64 = 150;
 
 pub(crate) struct StyleRuntime {
     display: gdk::Display,
+    default_provider: Option<gtk::CssProvider>,
     user_css_path: Option<PathBuf>,
     user_css_provider: RefCell<Option<gtk::CssProvider>>,
     user_css_monitor: RefCell<Option<gio::FileMonitor>>,
@@ -24,7 +25,7 @@ impl StyleRuntime {
     pub(crate) fn install(style: &StyleConfig, config_source: Option<&Path>) -> Option<Rc<Self>> {
         let display = gdk::Display::default()?;
 
-        if style.load_default {
+        let default_provider = if style.load_default {
             let default_provider = gtk::CssProvider::new();
             default_provider.load_from_data(include_str!("../style.css"));
             gtk::style_context_add_provider_for_display(
@@ -32,7 +33,10 @@ impl StyleRuntime {
                 &default_provider,
                 gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
-        }
+            Some(default_provider)
+        } else {
+            None
+        };
 
         let user_css_path = style
             .path
@@ -41,6 +45,7 @@ impl StyleRuntime {
 
         let runtime = Rc::new(Self {
             display,
+            default_provider,
             user_css_path,
             user_css_provider: RefCell::new(None),
             user_css_monitor: RefCell::new(None),
@@ -122,5 +127,21 @@ impl StyleRuntime {
             },
         );
         *self.reload_debounce_source.borrow_mut() = Some(source_id);
+    }
+}
+
+impl Drop for StyleRuntime {
+    fn drop(&mut self) {
+        if let Some(source_id) = self.reload_debounce_source.borrow_mut().take() {
+            source_id.remove();
+        }
+
+        if let Some(provider) = self.user_css_provider.borrow_mut().take() {
+            gtk::style_context_remove_provider_for_display(&self.display, &provider);
+        }
+
+        if let Some(provider) = self.default_provider.take() {
+            gtk::style_context_remove_provider_for_display(&self.display, &provider);
+        }
     }
 }
