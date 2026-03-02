@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal Config Edits"
+  short_description: "Edit ~/.config/vibar, not repo defaults."
+  default_prompt: "For vibar config/style changes, edit ~/.config/vibar files unless I explicitly request repository defaults."
