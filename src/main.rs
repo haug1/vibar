@@ -5,6 +5,8 @@ use gtk::{Application, ApplicationWindow, Box as GtkBox, CenterBox, Orientation}
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -12,14 +14,123 @@ mod config;
 mod modules;
 mod style;
 
-use config::{load_config, Config};
+use config::{load_config, parse_config, Config, LoadedConfig};
 use modules::{ModuleBuildContext, ModuleConfig};
 
 const APP_ID: &str = "dev.haug1.vibar";
+const CONFIG_RELOAD_DEBOUNCE_MILLIS: u64 = 200;
 
 struct AppRuntime {
-    _style_runtime: Option<Rc<style::StyleRuntime>>,
+    app: Application,
+    windows: Rc<RefCell<HashMap<String, ApplicationWindow>>>,
+    config: Rc<RefCell<Config>>,
+    config_source_path: RefCell<Option<PathBuf>>,
+    style_runtime: RefCell<Option<Rc<style::StyleRuntime>>>,
     _monitor_model: gtk::gio::ListModel,
+    _config_monitor: RefCell<Option<gtk::gio::FileMonitor>>,
+    config_reload_source: RefCell<Option<gtk::glib::SourceId>>,
+}
+
+impl AppRuntime {
+    fn sync_windows(&self) {
+        sync_monitor_windows(&self.app, &self.config, &self.windows);
+    }
+
+    fn rebuild_windows(&self) {
+        let removed_windows = {
+            let mut tracked_windows = self.windows.borrow_mut();
+            tracked_windows.drain().map(|(_, window)| window).collect()
+        };
+        close_windows_now(removed_windows);
+        self.sync_windows();
+    }
+
+    fn apply_loaded_config(self: &Rc<Self>, loaded_config: LoadedConfig) {
+        *self.config.borrow_mut() = loaded_config.config;
+        *self.config_source_path.borrow_mut() = loaded_config.source_path;
+
+        let style_runtime = {
+            let config = self.config.borrow();
+            style::StyleRuntime::install(&config.style, self.config_source_path.borrow().as_deref())
+        };
+        *self.style_runtime.borrow_mut() = style_runtime;
+
+        self.install_config_watch();
+        self.rebuild_windows();
+    }
+
+    fn reload_config_from_source(self: &Rc<Self>) {
+        let Some(path) = self.config_source_path.borrow().clone() else {
+            return;
+        };
+        let content = match fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) => {
+                eprintln!("Failed to read config file {}: {err}", path.display());
+                return;
+            }
+        };
+
+        let parsed = match parse_config(&content) {
+            Ok(config) => config,
+            Err(err) => {
+                eprintln!("Failed to parse {}: {err}", path.display());
+                return;
+            }
+        };
+
+        self.apply_loaded_config(LoadedConfig {
+            config: parsed,
+            source_path: Some(path),
+        });
+    }
+
+    fn schedule_config_reload(self: &Rc<Self>) {
+        if self.config_reload_source.borrow().is_some() {
+            return;
+        }
+
+        let weak_runtime = Rc::downgrade(self);
+        let source_id = gtk::glib::timeout_add_local_once(
+            Duration::from_millis(CONFIG_RELOAD_DEBOUNCE_MILLIS),
+            move || {
+                let Some(runtime) = weak_runtime.upgrade() else {
+                    return;
+                };
+                runtime.config_reload_source.borrow_mut().take();
+                runtime.reload_config_from_source();
+            },
+        );
+        *self.config_reload_source.borrow_mut() = Some(source_id);
+    }
+
+    fn install_config_watch(self: &Rc<Self>) {
+        self._config_monitor.borrow_mut().take();
+
+        let Some(path) = self.config_source_path.borrow().clone() else {
+            return;
+        };
+
+        let file = gtk::gio::File::for_path(&path);
+        let monitor = match file.monitor_file(
+            gtk::gio::FileMonitorFlags::NONE,
+            gtk::gio::Cancellable::NONE,
+        ) {
+            Ok(monitor) => monitor,
+            Err(err) => {
+                eprintln!("Failed to watch config file {}: {err}", path.display());
+                return;
+            }
+        };
+
+        let weak_runtime = Rc::downgrade(self);
+        monitor.connect_changed(move |_, _, _, _| {
+            if let Some(runtime) = weak_runtime.upgrade() {
+                runtime.schedule_config_reload();
+            }
+        });
+        *self._config_monitor.borrow_mut() = Some(monitor);
+    }
 }
 
 fn main() {
@@ -30,13 +141,14 @@ fn main() {
 
     app.connect_activate(|app| {
         let loaded_config = load_config();
-        let style_runtime = style::StyleRuntime::install(
+        let initial_style_runtime = style::StyleRuntime::install(
             &loaded_config.config.style,
             loaded_config.source_path.as_deref(),
         );
+        let current_config = Rc::new(RefCell::new(loaded_config.config.clone()));
 
         let windows = Rc::new(RefCell::new(HashMap::new()));
-        sync_monitor_windows(app, &loaded_config.config, &windows);
+        sync_monitor_windows(app, &current_config, &windows);
 
         let Some(display) = gdk::Display::default() else {
             return;
@@ -44,7 +156,7 @@ fn main() {
         let monitor_model = display.monitors();
         monitor_model.connect_items_changed({
             let app = app.clone();
-            let config = loaded_config.config.clone();
+            let config = Rc::clone(&current_config);
             let windows = Rc::clone(&windows);
             move |_, _, _, _| {
                 sync_monitor_windows(&app, &config, &windows);
@@ -52,9 +164,16 @@ fn main() {
         });
 
         let app_runtime = Rc::new(AppRuntime {
-            _style_runtime: style_runtime,
+            app: app.clone(),
+            windows,
+            config: current_config,
+            config_source_path: RefCell::new(loaded_config.source_path),
+            style_runtime: RefCell::new(initial_style_runtime),
             _monitor_model: monitor_model,
+            _config_monitor: RefCell::new(None),
+            config_reload_source: RefCell::new(None),
         });
+        app_runtime.install_config_watch();
         let app_runtime_for_shutdown = Rc::clone(&app_runtime);
         app.connect_shutdown(move |_| {
             let _ = &app_runtime_for_shutdown;
@@ -66,9 +185,10 @@ fn main() {
 
 fn sync_monitor_windows(
     app: &Application,
-    config: &Config,
+    config: &Rc<RefCell<Config>>,
     windows: &Rc<RefCell<HashMap<String, ApplicationWindow>>>,
 ) {
+    let config_snapshot = config.borrow().clone();
     let monitors = connected_monitors();
     let monitor_keys = monitors
         .iter()
@@ -98,7 +218,7 @@ fn sync_monitor_windows(
 
     if monitor_keys.is_empty() {
         if !tracked_windows.contains_key(FALLBACK_WINDOW_KEY) {
-            let window = build_window(app, config, None);
+            let window = build_window(app, &config_snapshot, None);
             debug_dump_dom_if_enabled(&window, None);
             window.present();
             tracked_windows.insert(FALLBACK_WINDOW_KEY.to_string(), window);
@@ -115,7 +235,7 @@ fn sync_monitor_windows(
 
         attach_monitor_connector_resolve_once(&monitor, app, config, windows);
 
-        let window = build_window(app, config, Some(&monitor));
+        let window = build_window(app, &config_snapshot, Some(&monitor));
         let connector = monitor.connector().map(|value| value.to_string());
         debug_dump_dom_if_enabled(&window, connector.as_deref());
         window.present();
@@ -139,7 +259,7 @@ fn monitor_key(monitor: &gdk::Monitor) -> String {
 fn attach_monitor_connector_resolve_once(
     monitor: &gdk::Monitor,
     app: &Application,
-    config: &Config,
+    config: &Rc<RefCell<Config>>,
     windows: &Rc<RefCell<HashMap<String, ApplicationWindow>>>,
 ) {
     if monitor.connector().is_some() {
@@ -152,7 +272,7 @@ fn attach_monitor_connector_resolve_once(
     let monitor_for_cb = monitor.clone();
     let id = monitor.connect_connector_notify({
         let app = app.clone();
-        let config = config.clone();
+        let config = Rc::clone(config);
         let windows = Rc::clone(windows);
         move |item| {
             if item.connector().is_none() {
@@ -179,6 +299,16 @@ fn defer_close_windows(removed_windows: Vec<ApplicationWindow>) {
             window.close();
         }
     });
+}
+
+fn close_windows_now(removed_windows: Vec<ApplicationWindow>) {
+    if removed_windows.is_empty() {
+        return;
+    }
+
+    for window in removed_windows {
+        window.close();
+    }
 }
 
 fn connected_monitors() -> Vec<gdk::Monitor> {
