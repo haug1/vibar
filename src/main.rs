@@ -17,6 +17,11 @@ use modules::{ModuleBuildContext, ModuleConfig};
 
 const APP_ID: &str = "dev.haug1.vibar";
 
+struct AppRuntime {
+    _style_runtime: Option<Rc<style::StyleRuntime>>,
+    _monitor_model: gtk::gio::ListModel,
+}
+
 fn main() {
     let app = Application::builder()
         .application_id(APP_ID)
@@ -36,15 +41,23 @@ fn main() {
         let Some(display) = gdk::Display::default() else {
             return;
         };
-        let monitors = display.monitors();
-        monitors.connect_items_changed({
+        let monitor_model = display.monitors();
+        monitor_model.connect_items_changed({
             let app = app.clone();
             let config = loaded_config.config.clone();
             let windows = Rc::clone(&windows);
-            let _style_runtime = style_runtime.clone();
             move |_, _, _, _| {
                 sync_monitor_windows(&app, &config, &windows);
             }
+        });
+
+        let app_runtime = Rc::new(AppRuntime {
+            _style_runtime: style_runtime,
+            _monitor_model: monitor_model,
+        });
+        let app_runtime_for_shutdown = Rc::clone(&app_runtime);
+        app.connect_shutdown(move |_| {
+            let _ = &app_runtime_for_shutdown;
         });
     });
 
