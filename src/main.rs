@@ -25,7 +25,7 @@ fn main() {
 
     app.connect_activate(|app| {
         let loaded_config = load_config();
-        style::load_styles(
+        let style_runtime = style::StyleRuntime::install(
             &loaded_config.config.style,
             loaded_config.source_path.as_deref(),
         );
@@ -41,6 +41,7 @@ fn main() {
             let app = app.clone();
             let config = loaded_config.config.clone();
             let windows = Rc::clone(&windows);
+            let _style_runtime = style_runtime.clone();
             move |_, _, _, _| {
                 sync_monitor_windows(&app, &config, &windows);
             }
