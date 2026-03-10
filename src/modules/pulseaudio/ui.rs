@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
@@ -18,6 +20,19 @@ pub(super) struct PulseAudioControlsUi {
     sink_inputs_box: GtkBox,
     suppress_sink_scale_callback: Arc<AtomicBool>,
     sink_muted_state: Arc<AtomicBool>,
+    sink_input_rows: RefCell<HashMap<u32, SinkInputRowUi>>,
+}
+
+#[derive(Clone)]
+struct SinkInputRowUi {
+    row: GtkBox,
+    mute_button: Button,
+    name_label: Label,
+    scale: Scale,
+    percent_label: Label,
+    muted_state: Arc<AtomicBool>,
+    suppress_scale_callback: Arc<AtomicBool>,
+    drag_active: Arc<AtomicBool>,
 }
 
 pub(super) fn build_controls_ui(
@@ -108,6 +123,7 @@ pub(super) fn build_controls_ui(
         sink_inputs_box: inputs_box,
         suppress_sink_scale_callback,
         sink_muted_state,
+        sink_input_rows: RefCell::new(HashMap::new()),
     }
 }
 
@@ -237,67 +253,153 @@ pub(super) fn refresh_controls_ui(
         }
     }
 
-    clear_box_children(&controls_ui.sink_inputs_box);
-    if state.sink_inputs.is_empty() {
-        let no_streams_label = Label::new(Some("No active playback streams"));
-        no_streams_label.add_css_class("pulseaudio-controls-empty");
-        no_streams_label.set_xalign(0.0);
-        controls_ui.sink_inputs_box.append(&no_streams_label);
-    } else {
-        for input in &state.sink_inputs {
-            let row = GtkBox::new(Orientation::Horizontal, 6);
-            row.add_css_class("pulseaudio-controls-input-row");
-
-            let mute_button = Button::with_label(if input.muted {
-                ICON_MUTED
-            } else {
-                ICON_VOLUME_HIGH
-            });
-            mute_button.add_css_class("pulseaudio-control-button");
-            let worker_tx_for_mute = worker_tx.clone();
-            let index = input.index;
-            let next_mute = !input.muted;
-            mute_button.connect_clicked(move |_| {
-                let _ = worker_tx_for_mute.send(WorkerCommand::SetSinkInputMute {
-                    index,
-                    muted: next_mute,
-                });
-            });
-            row.append(&mute_button);
-
-            let name_label = Label::new(Some(&input.name));
-            name_label.add_css_class("pulseaudio-controls-input-name");
-            name_label.set_hexpand(true);
-            name_label.set_xalign(0.0);
-            row.append(&name_label);
-
-            let scale =
-                Scale::with_range(Orientation::Horizontal, 0.0, CONTROLS_UI_MAX_PERCENT, 1.0);
-            scale.add_css_class("pulseaudio-volume-scale");
-            scale.set_draw_value(false);
-            scale.set_width_request(120);
-            scale.set_value((input.volume as f64).min(CONTROLS_UI_MAX_PERCENT));
-            let percent_label = Label::new(Some(&format!("{}%", input.volume)));
-            percent_label.add_css_class("pulseaudio-volume-percent");
-            let worker_tx_for_volume = worker_tx.clone();
-            let index = input.index;
-            let percent_label_for_change = percent_label.clone();
-            scale.connect_value_changed(move |scale| {
-                let percent = scale.value().round().clamp(0.0, CONTROLS_UI_MAX_PERCENT) as u32;
-                percent_label_for_change.set_text(&format!("{percent}%"));
-                let _ = worker_tx_for_volume
-                    .send(WorkerCommand::SetSinkInputVolumePercent { index, percent });
-            });
-            row.append(&scale);
-            row.append(&percent_label);
-
-            controls_ui.sink_inputs_box.append(&row);
-        }
-    }
+    sync_sink_input_rows(controls_ui, state, worker_tx);
 }
 
 fn clear_box_children(container: &GtkBox) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
+}
+
+fn sync_sink_input_rows(
+    controls_ui: &PulseAudioControlsUi,
+    state: &AudioControlsState,
+    worker_tx: mpsc::Sender<WorkerCommand>,
+) {
+    let mut rows = controls_ui.sink_input_rows.borrow_mut();
+    let wanted = state
+        .sink_inputs
+        .iter()
+        .map(|input| input.index)
+        .collect::<HashSet<_>>();
+
+    rows.retain(|index, row| {
+        if wanted.contains(index) {
+            true
+        } else {
+            controls_ui.sink_inputs_box.remove(&row.row);
+            false
+        }
+    });
+
+    if state.sink_inputs.is_empty() {
+        if controls_ui.sink_inputs_box.first_child().is_none() {
+            let no_streams_label = Label::new(Some("No active playback streams"));
+            no_streams_label.add_css_class("pulseaudio-controls-empty");
+            no_streams_label.set_xalign(0.0);
+            controls_ui.sink_inputs_box.append(&no_streams_label);
+        }
+        return;
+    }
+
+    for input in &state.sink_inputs {
+        let row = rows
+            .entry(input.index)
+            .or_insert_with(|| build_sink_input_row(input.index, worker_tx.clone()));
+        update_sink_input_row(row, input);
+        if row.row.parent().is_none() {
+            controls_ui.sink_inputs_box.append(&row.row);
+        }
+    }
+}
+
+fn build_sink_input_row(index: u32, worker_tx: mpsc::Sender<WorkerCommand>) -> SinkInputRowUi {
+    let row = GtkBox::new(Orientation::Horizontal, 6);
+    row.add_css_class("pulseaudio-controls-input-row");
+
+    let mute_button = Button::with_label(ICON_VOLUME_HIGH);
+    mute_button.add_css_class("pulseaudio-control-button");
+    row.append(&mute_button);
+
+    let name_label = Label::new(None);
+    name_label.add_css_class("pulseaudio-controls-input-name");
+    name_label.set_hexpand(true);
+    name_label.set_xalign(0.0);
+    row.append(&name_label);
+
+    let scale = Scale::with_range(Orientation::Horizontal, 0.0, CONTROLS_UI_MAX_PERCENT, 1.0);
+    scale.add_css_class("pulseaudio-volume-scale");
+    scale.set_draw_value(false);
+    scale.set_width_request(120);
+    row.append(&scale);
+
+    let percent_label = Label::new(Some("0%"));
+    percent_label.add_css_class("pulseaudio-volume-percent");
+    row.append(&percent_label);
+
+    let muted_state = Arc::new(AtomicBool::new(false));
+    let drag_active = Arc::new(AtomicBool::new(false));
+    let drag_gesture = GestureClick::new();
+    {
+        let drag_active = drag_active.clone();
+        drag_gesture.connect_pressed(move |_, _, _, _| {
+            drag_active.store(true, Ordering::Relaxed);
+        });
+    }
+    {
+        let drag_active = drag_active.clone();
+        drag_gesture.connect_released(move |_, _, _, _| {
+            drag_active.store(false, Ordering::Relaxed);
+        });
+    }
+    scale.add_controller(drag_gesture);
+
+    let suppress_scale_callback = Arc::new(AtomicBool::new(false));
+    {
+        let worker_tx = worker_tx.clone();
+        let suppress_scale_callback = suppress_scale_callback.clone();
+        let percent_label = percent_label.clone();
+        scale.connect_value_changed(move |scale| {
+            let percent = scale.value().round().clamp(0.0, CONTROLS_UI_MAX_PERCENT) as u32;
+            percent_label.set_text(&format!("{percent}%"));
+            if suppress_scale_callback.load(Ordering::Relaxed) {
+                return;
+            }
+            let _ = worker_tx.send(WorkerCommand::SetSinkInputVolumePercent { index, percent });
+        });
+    }
+    {
+        let worker_tx = worker_tx.clone();
+        let drag_active = drag_active.clone();
+        let muted_state = muted_state.clone();
+        mute_button.connect_clicked(move |_| {
+            drag_active.store(false, Ordering::Relaxed);
+            let _ = worker_tx.send(WorkerCommand::SetSinkInputMute {
+                index,
+                muted: !muted_state.load(Ordering::Relaxed),
+            });
+        });
+    }
+
+    SinkInputRowUi {
+        row,
+        mute_button,
+        name_label,
+        scale,
+        percent_label,
+        muted_state,
+        suppress_scale_callback,
+        drag_active,
+    }
+}
+
+fn update_sink_input_row(row: &SinkInputRowUi, input: &super::SinkInputEntry) {
+    row.mute_button.set_label(if input.muted {
+        ICON_MUTED
+    } else {
+        ICON_VOLUME_HIGH
+    });
+    row.muted_state.store(input.muted, Ordering::Relaxed);
+    row.name_label.set_text(&input.name);
+    if !row.drag_active.load(Ordering::Relaxed) {
+        row.percent_label.set_text(&format!("{}%", input.volume));
+        row.suppress_scale_callback.store(true, Ordering::Relaxed);
+        row.scale
+            .set_value((input.volume as f64).min(CONTROLS_UI_MAX_PERCENT));
+        row.suppress_scale_callback.store(false, Ordering::Relaxed);
+    }
+
+    row.mute_button
+        .set_tooltip_text(Some(&format!("Mute {}", input.name)));
 }
